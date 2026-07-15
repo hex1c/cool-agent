@@ -1,0 +1,22 @@
+schemaVersion: novus.config.v1
+kind: environment
+environment: staging
+telegram:
+  botUsername: novus_staging_bot
+  forumChatId: -1001234567891
+  botTokenRef: /novus/staging/telegram/bot-token
+  webhookSecretRef: /novus/staging/telegram/webhook-secret
+  privacyMode: true
+google:
+  clientId: sanitized-staging-client.apps.googleusercontent.com
+  clientSecretRef: /novus/staging/google/client-secret
+  callbackUri: https://staging.example.test/oauth/google/callback
+  scopes:
+    - openid
+    - email
+    - https://www.googleapis.com/auth/drive.file
+    - https://www.googleapis.com/auth/calendar.events
+email:
+  secretRef: /novus/staging/smtp/credentials
+ai:
+  secretRef: /novus/staging/ai/provider-key

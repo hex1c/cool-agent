@@ -1,0 +1,9 @@
+schemaVersion: novus.config.v1
+kind: environment
+environment: development
+budget:
+  monthlyCapMicroInr: 300000000
+  warningThresholdMicroInr: 300000000
+  suspensionThresholdMicroInr: 270000000
+  operationalReserveMicroInr: 10000000
+  safetyMarginBps: 2000

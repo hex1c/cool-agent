@@ -78,8 +78,10 @@ services after an approved group participant reviews and confirms the action.
     company later changes its retention policy.
 15. New workflow intake is suspended before projected AWS expenditure would
     exceed ₹300 for the month.
-16. Secrets Manager is acceptable when its recurring cost remains within the
-    ₹300 monthly budget.
+16. Secrets use separate AWS Systems Manager Parameter Store standard-tier
+    `SecureString` values encrypted with the AWS managed Systems Manager KMS key.
+    Credentials remain isolated by environment and capability; application-only
+    encryption and cost-driven credential bundling are forbidden.
 17. Standard Telegram cloud encryption is accepted. Bot chats are not treated
     as end-to-end encrypted. AWS copies remain encrypted in transit and at rest.
 18. Development, staging, and production use isolated stacks in the same AWS
@@ -205,7 +207,9 @@ At minimum, progress is reported for:
    participant's stable Telegram user ID.
 5. The worker requests Calendar, Drive, Sheets, and Docs permissions during the
    initial onboarding flow.
-6. OAuth refresh tokens are stored in AWS Secrets Manager.
+6. OAuth refresh tokens are stored as separate AWS Systems Manager Parameter
+   Store standard-tier `SecureString` values, encrypted with the AWS managed
+   Systems Manager KMS key.
 7. OAuth links, authorization codes, access tokens, refresh tokens, and secrets
    must never be sent to a topic/group or written to logs.
 8. A participant without connected Google access may still contribute to a
@@ -395,7 +399,7 @@ After the final failed attempt, the worker:
 | Workflow orchestration | AWS Step Functions Standard |
 | Workflow metadata | Amazon DynamoDB |
 | Raw and generated objects | Amazon S3 |
-| Secrets | AWS Secrets Manager |
+| Secrets | AWS Systems Manager Parameter Store standard-tier `SecureString` + AWS managed KMS key |
 | Public endpoints | Amazon API Gateway and Lambda |
 | CI | GitHub Actions |
 | Configuration | Version-controlled YAML plus JSON Schema |
@@ -448,7 +452,8 @@ payloads. Native ephemeral Pi session state is not the sole durable record.
 ## 9. Configuration
 
 Non-secret deployment configuration lives in version-controlled YAML. Secrets
-remain in AWS Secrets Manager.
+remain in separate AWS Systems Manager Parameter Store standard-tier
+`SecureString` values encrypted with the AWS managed Systems Manager KMS key.
 
 The configuration schema includes:
 
@@ -488,7 +493,9 @@ Default controls are:
 - Continue serving non-mutating status and artifact retrieval where doing so
   does not risk the cap.
 - Retain existing data indefinitely even while new intake is suspended.
-- Estimate fixed Secrets Manager storage cost before each deployment.
+- Estimate Parameter Store/KMS request use and retained-object storage cost
+  before each deployment; standard Parameter Store storage has no additional
+  monthly charge.
 - Configure AWS Budgets actual and forecast alerts.
 - Record per-workflow estimated AWS usage.
 
@@ -633,8 +640,9 @@ const { session } = await createAgentSession({
 
 A Docker-based local sandbox must be available before shared AWS deployment.
 It uses AWS SAM CLI for Lambda/API Gateway execution, DynamoDB Local, and Step
-Functions Local. LocalStack may be used for integrated S3, Secrets Manager, and
-other AWS service emulation where no AWS-provided local emulator exists.
+Functions Local. LocalStack may be used for integrated S3, Systems Manager
+Parameter Store, and other AWS service emulation where no AWS-provided local
+emulator exists.
 
 The sandbox must:
 
@@ -789,7 +797,8 @@ The specification is implemented successfully when:
 - [DynamoDB Local](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/DynamoDBLocal.html)
 - [Step Functions Local](https://docs.aws.amazon.com/step-functions/latest/dg/sfn-local.html)
 - [AWS Budgets](https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-managing-costs.html)
-- [AWS Secrets Manager pricing](https://aws.amazon.com/secrets-manager/pricing/)
+- [AWS Systems Manager pricing](https://aws.amazon.com/systems-manager/pricing/)
+- [AWS Systems Manager Parameter Store SecureString](https://docs.aws.amazon.com/systems-manager/latest/userguide/secure-string-parameter-kms-encryption.html)
 - [Pi SDK](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/sdk.md)
 - [Pi custom providers](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/custom-provider.md)
 - [Fireworks vision-language models](https://docs.fireworks.ai/guides/querying-vision-language-models)

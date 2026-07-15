@@ -1,0 +1,9 @@
+schemaVersion: novus.config.v1
+kind: environment
+environment: development
+telegram:
+  botUsername: novus_dev_bot
+  forumChatId: -1001234567890
+  botTokenRef: /novus/development/telegram/bot-token
+  webhookSecretRef: /novus/development/telegram/webhook-secret
+  privacyMode: true

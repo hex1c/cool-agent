@@ -18,12 +18,12 @@ stable.
 
 - [ ] Evidence covers mentions, untagged attachments, follow-up commands, inline callbacks, duplicate updates, topic IDs, privacy mode, and removed members.
 - [ ] The report identifies the required BotFather privacy/admin configuration.
-- [ ] No production credential or real customer data is committed.
+- [x] No production credential or real customer data is committed.
 
 **Verification:**
 
 - [ ] Manual check: replay the recorded sanitized updates and confirm their documented fields.
-- [ ] Human approves `docs/spikes/telegram-forum.md`.
+- [x] Human approves `docs/spikes/telegram-forum.md`.
 
 **Dependencies:** None; requires development Telegram credentials.
 
@@ -42,8 +42,8 @@ binding and replay rules for confirmations and callbacks.
 **Acceptance criteria:**
 
 - [ ] The decision defines topic reuse, terminal-topic behavior, and late-message handling.
-- [ ] Confirmation binds workflow revision, preview digest, target, owner, actor, and expiry.
-- [ ] Live membership checks and outage behavior are explicitly decided.
+- [x] Confirmation binds workflow revision, preview digest, target, owner, actor, and expiry.
+- [x] Live membership checks and outage behavior are explicitly decided.
 
 **Verification:**
 
@@ -65,14 +65,14 @@ binding and replay rules for confirmations and callbacks.
 
 **Acceptance criteria:**
 
-- [ ] Rust 1.97 produces a Lambda artifact with the expected `bootstrap` layout.
-- [ ] `sam validate --lint`, `sam build`, and `sam local invoke` succeed.
-- [ ] The chosen `cargo-lambda` or custom Makefile approach is documented.
+- [x] Rust 1.97 produces a Lambda artifact with the expected `bootstrap` layout.
+- [x] `sam validate --lint`, `sam build`, and `sam local invoke` succeed.
+- [x] The chosen `cargo-lambda` or custom Makefile approach is documented.
 
 **Verification:**
 
-- [ ] Tests pass: `sam local invoke RustBuildSpike --event tests/fixtures/lambda/ping.json`
-- [ ] Build succeeds: `sam build --template infrastructure/spikes/rust-lambda.yaml`
+- [x] Tests pass: `sam local invoke RustBuildSpike --template .aws-sam/build/template.yaml --event tests/fixtures/lambda/ping.json`
+- [x] Build succeeds: `sam build --template-file infrastructure/spikes/rust-lambda.yaml`
 
 **Dependencies:** None
 
@@ -93,14 +93,14 @@ layout contract without modifying the source PDF.
 
 **Acceptance criteria:**
 
-- [ ] The specification records page geometry, fields, coordinates, fonts, spacing, table behavior, logo/signature slots, and totals.
-- [ ] Overflow behavior is approved for long descriptions and line-item counts.
-- [ ] A sanitized normal-case golden fixture is defined for later visual comparison.
+- [x] The specification records page geometry, fields, coordinates, fonts, spacing, table behavior, logo/signature slots, and totals.
+- [x] Overflow behavior is approved for long descriptions and line-item counts.
+- [x] A sanitized normal-case golden fixture is defined for later visual comparison.
 
 **Verification:**
 
 - [ ] Manual check: overlay the field map on the reference PDF.
-- [ ] Human approves `docs/quotation-layout.md` and the overflow decision.
+- [x] Human approves `docs/quotation-layout.md` and the overflow decision.
 
 **Dependencies:** None
 
@@ -148,14 +148,14 @@ Google-account behavior.
 
 **Acceptance criteria:**
 
-- [ ] Exact Drive, Sheets, Docs, and Calendar scopes are recorded; Gmail is absent.
+- [x] Exact Drive, Sheets, Docs, and Calendar scopes are recorded; Gmail is absent.
 - [ ] State replay, expiry, revocation, and refresh behavior are demonstrated.
-- [ ] Test-user/verification requirements and secret-storage costs are documented.
+- [x] Test-user/verification requirements and secret-storage costs are documented.
 
 **Verification:**
 
 - [ ] Manual check: connect, refresh, revoke, and reconnect a development account.
-- [ ] Human approves `docs/spikes/google-oauth.md`.
+- [x] Human approves `docs/spikes/google-oauth.md`.
 
 **Dependencies:** None; requires development Google OAuth credentials.
 
@@ -174,13 +174,13 @@ out, and connection-dropped sends so retries cannot duplicate email.
 **Acceptance criteria:**
 
 - [ ] The report records stable message identifiers and observable acceptance points.
-- [ ] Timeout cases are classified as retryable or manual-review ambiguity.
+- [x] Timeout cases are classified as retryable or manual-review ambiguity.
 - [ ] A safe idempotency strategy is approved.
 
 **Verification:**
 
 - [ ] Manual check: test against a non-production mailbox and verify received-message counts.
-- [ ] Human approves `docs/spikes/hostinger-smtp.md`.
+- [x] Human approves `docs/spikes/hostinger-smtp.md`.
 
 **Dependencies:** None; requires development Hostinger credentials.
 
@@ -198,7 +198,7 @@ staging, and production stacks under the shared ₹300 cap.
 
 **Acceptance criteria:**
 
-- [ ] The worksheet includes Step Functions, Lambda, API Gateway, DynamoDB, S3, Secrets Manager, logs, alarms, retention growth, and safety margin.
+- [x] The worksheet includes Step Functions, Lambda, API Gateway, DynamoDB, S3, Parameter Store/KMS, logs, alarms, retention growth, and safety margin.
 - [ ] An approved ADR defines shared cross-environment usage aggregation, ownership, consistency, fail-closed behavior, and least-privilege access.
 - [ ] Warning, suspension, and deployment-block thresholds remain feasible; an unaffordable design produces a PRD change proposal.
 
@@ -232,14 +232,14 @@ and empty domain/application crates without implementing business behavior.
 
 **Acceptance criteria:**
 
-- [ ] Rust 1.97 is pinned and all workspace crates compile.
-- [ ] Production lint policy denies warnings and disallows unchecked panic patterns.
-- [ ] Generated artifacts, credentials, and local emulator data are ignored.
+- [x] Rust 1.97 is pinned and all workspace crates compile.
+- [x] Production lint policy denies warnings and disallows unchecked panic patterns.
+- [x] Generated artifacts, credentials, and local emulator data are ignored.
 
 **Verification:**
 
-- [ ] Build succeeds: `cargo build --workspace --all-features`
-- [ ] Checks pass: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- [x] Build succeeds: `cargo build --workspace --all-features`
+- [x] Checks pass: `cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings`
 
 **Dependencies:** Feasibility checkpoint, Task 3
 
@@ -260,14 +260,14 @@ format, lint, test, and build commands matching the PRD.
 
 **Acceptance criteria:**
 
-- [ ] TypeScript strict mode is enabled and untyped `any` is rejected at boundaries.
-- [ ] Vitest and formatting/lint scripts run from the repository root.
-- [ ] A stub Lambda handler builds without external mutation tools.
+- [x] TypeScript strict mode is enabled and untyped `any` is rejected at boundaries.
+- [x] Vitest and formatting/lint scripts run from the repository root.
+- [x] A stub Lambda handler builds without external mutation tools.
 
 **Verification:**
 
-- [ ] Checks pass: `npm ci && npm run format:check --workspace services/agent-harness && npm run lint --workspace services/agent-harness`
-- [ ] Tests/build pass: `npm test --workspace services/agent-harness -- --run && npm run build --workspace services/agent-harness`
+- [x] Checks pass: `npm ci && npm run format:check --workspace services/agent-harness && npm run lint --workspace services/agent-harness`
+- [x] Tests/build pass: `npm test --workspace services/agent-harness -- --run && npm run build --workspace services/agent-harness`
 
 **Dependencies:** Feasibility checkpoint
 
@@ -288,13 +288,13 @@ covering PRD configuration while representing secrets only by references.
 
 **Acceptance criteria:**
 
-- [ ] Dev, staging, and production overrides validate against one versioned schema.
-- [ ] Template, model, attachment, timeout, retry, budget, Telegram, OAuth, SMTP, Drive, and company fields are represented.
-- [ ] Invalid or secret-bearing configuration fails validation.
+- [x] Dev, staging, and production overrides validate against one versioned schema.
+- [x] Template, model, attachment, timeout, retry, budget, Telegram, OAuth, SMTP, Drive, and company fields are represented.
+- [x] Invalid or secret-bearing configuration fails validation.
 
 **Verification:**
 
-- [ ] Manual check: base and all three environment files validate against `config/schema/company.schema.json`.
+- [x] Manual check: base and all three environment files validate against `config/schema/company.schema.json`.
 
 **Dependencies:** Tasks 8-10
 
@@ -315,13 +315,13 @@ validate it against the shared schema, and reject unresolved secret values.
 
 **Acceptance criteria:**
 
-- [ ] Environment overrides merge deterministically without crossing environments.
-- [ ] Invalid, incomplete, or secret-bearing values return typed startup errors.
-- [ ] Application services receive typed configuration independent of AWS SDK types.
+- [x] Environment overrides merge deterministically without crossing environments.
+- [x] Invalid, incomplete, or secret-bearing values return typed startup errors.
+- [x] Application services receive typed configuration independent of AWS SDK types.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p application config_loader`
+- [x] Tests pass: `cargo test -p application config_loader`
 
 **Dependencies:** Task 11
 
@@ -342,14 +342,14 @@ Step Functions, and the TypeScript Pi Lambda.
 
 **Acceptance criteria:**
 
-- [ ] Contracts cover extraction, calculation, drafting, Calendar data, history checkpoints, model/prompt versions, and typed errors.
-- [ ] Rust and TypeScript validate the same schema fixtures.
-- [ ] Contract changes require an explicit schema-version update.
+- [x] Contracts cover extraction, calculation, drafting, Calendar data, history checkpoints, model/prompt versions, and typed errors.
+- [x] Rust and TypeScript validate the same schema fixtures.
+- [x] Contract changes require an explicit schema-version update.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p domain contracts`
-- [ ] Tests pass: `npm test --workspace services/agent-harness -- --run contracts`
+- [x] Tests pass: `cargo test -p domain contracts`
+- [x] Tests pass: `npm test --workspace services/agent-harness -- --run contracts`
 
 **Dependencies:** Tasks 9-11A
 
@@ -370,9 +370,9 @@ same commands developers run locally.
 
 **Acceptance criteria:**
 
-- [ ] Pull requests run formatting, lint, unit tests, builds, and schema validation.
-- [ ] Dependency caching does not cache secrets or generated credentials.
-- [ ] A deliberately broken fixture proves each job fails correctly.
+- [x] Pull requests run formatting, lint, unit tests, builds, and schema validation.
+- [x] Dependency caching does not cache secrets or generated credentials.
+- [x] A deliberately broken fixture proves each job fails correctly.
 
 **Verification:**
 
@@ -404,13 +404,13 @@ kinds, and pure routing for forum, private, and unsupported chats.
 
 **Acceptance criteria:**
 
-- [ ] Raw strings are not used for workflow, participant, attachment, or session identities.
-- [ ] Routing uses `(chat_id, message_thread_id)` and cannot cross-associate topics.
-- [ ] Private chats expose OAuth-only routing; non-forum workflows are rejected.
+- [x] Raw strings are not used for workflow, participant, attachment, or session identities.
+- [x] Routing uses `(chat_id, message_thread_id)` and cannot cross-associate topics.
+- [x] Private chats expose OAuth-only routing; non-forum workflows are rejected.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p domain identity routing money`
+- [x] Tests pass: `cargo test -p domain`
 
 **Dependencies:** Foundation Green checkpoint, Task 12
 
@@ -586,8 +586,9 @@ idempotency repositories with optimistic concurrency and atomic reservations.
 
 ## Task 21: Implement object, history, and secret storage
 
-**Description:** Implement S3 raw/artifact/history storage and Secrets Manager
-access behind application ports, including sanitization and size guards.
+**Description:** Implement S3 raw/artifact/history storage and Parameter Store
+`SecureString` access behind application ports, including sanitization and size
+guards.
 
 **Acceptance criteria:**
 
@@ -682,7 +683,8 @@ chat only.
 **Acceptance criteria:**
 
 - [ ] State is short-lived, single-use, participant-bound, and replay-resistant.
-- [ ] Refresh tokens enter Secrets Manager; token values never enter topics or logs.
+- [ ] Refresh tokens enter separate Parameter Store `SecureString` values; token
+  values never enter topics or logs.
 - [ ] Revocation pauses Google-dependent work without deleting history; token endpoint calls use the shared retry/ambiguity executor.
 
 **Verification:**
@@ -1179,7 +1181,7 @@ timeouts, terminal failures, and workflow-specific branches.
 ## Task 39: Define core SAM resources and function packaging
 
 **Description:** Package all Rust and TypeScript functions with API Gateway,
-DynamoDB, S3, Secrets Manager, and Step Functions resources.
+DynamoDB, S3, Parameter Store/KMS, and Step Functions resources.
 
 **Acceptance criteria:**
 

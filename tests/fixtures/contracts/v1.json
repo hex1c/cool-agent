@@ -1,0 +1,63 @@
+{
+  "request": {
+    "contractVersion": "novus.ai.v1",
+    "requestId": "req-001",
+    "workflowId": "workflow-001",
+    "operation": "extraction",
+    "model": {
+      "provider": "fireworks",
+      "modelId": "accounts/fireworks/models/kimi-k2p5",
+      "promptVersion": "quotation-v1"
+    },
+    "history": {
+      "sequence": 0,
+      "historyDigest": "sha256:fixture",
+      "sanitizedObjectRef": null
+    },
+    "input": {
+      "instruction": "Extract the quotation details.",
+      "attachments": [
+        {
+          "objectRef": "s3://novus-fixtures/input-001",
+          "mediaType": "application/pdf",
+          "checksum": "sha256:input",
+          "extractedText": "Sanitized quotation input"
+        }
+      ]
+    }
+  },
+  "response": {
+    "contractVersion": "novus.ai.v1",
+    "requestId": "req-001",
+    "outcome": "success",
+    "model": {
+      "provider": "fireworks",
+      "modelId": "accounts/fireworks/models/kimi-k2p5",
+      "promptVersion": "quotation-v1"
+    },
+    "checkpoint": {
+      "sequence": 1,
+      "historyDigest": "sha256:fixture-next",
+      "sanitizedObjectRef": "s3://novus-fixtures/history-001"
+    },
+    "extraction": {
+      "customer": {
+        "name": "Example Customer",
+        "address": null,
+        "contact": null
+      },
+      "items": [
+        {
+          "description": "Example service",
+          "quantity": "1",
+          "unitPriceMicroInr": 1000000
+        }
+      ],
+      "currency": "INR"
+    },
+    "quotation": null,
+    "draft": null,
+    "calendar": null,
+    "error": null
+  }
+}

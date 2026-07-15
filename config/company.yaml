@@ -1,0 +1,71 @@
+schemaVersion: novus.config.v1
+kind: company
+company:
+  legalName: Novus Operations Pvt Ltd
+  displayName: Novus
+  contactEmail: operations@example.com
+  contactPhone: "+91 00000 00000"
+  address: Company address supplied at deployment time
+  logoRef: assets/logo-v1.png
+  signatureRef: assets/signature-v1.png
+quotation:
+  templateVersion: v1
+  referencePdf: docs/sample-quotation.pdf
+  currency: INR
+  taxRateBps: 1800
+  validityDays: 30
+  numberPrefix: NOV-
+  numberPadding: 5
+  terms:
+    - Payment due within 30 days.
+  fieldMapping:
+    customerName: customer.name
+    customerAddress: customer.address
+drive:
+  defaultFolderId: replace-with-deployment-folder
+  sharedDriveId: null
+calendar:
+  timezone: Asia/Kolkata
+  defaultCalendarId: primary
+  defaultReminderMinutes: 30
+  sendInvitationsByDefault: false
+email:
+  host: smtp.hostinger.com
+  port: 587
+  senderAddress: operations@example.com
+  secretRef: /novus/development/smtp/credentials
+  linkExpiryDays: 7
+  templateRef: null
+ai:
+  provider: fireworks
+  modelId: accounts/fireworks/models/kimi-k2p5
+  reasoning: basic
+  vision: true
+  secretRef: /novus/development/ai/provider-key
+  promptVersion: quotation-v1
+attachments:
+  maxCount: 10
+  maxBytes: 20971520
+  allowedMimeTypes:
+    - image/jpeg
+    - image/png
+    - application/pdf
+    - text/csv
+    - application/vnd.openxmlformats-officedocument.wordprocessingml.document
+    - application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+timeouts:
+  collectionSeconds: 1800
+  clarificationSeconds: 43200
+retry:
+  maxAttempts: 3
+  backoffBaseMs: 500
+  backoffMaxMs: 10000
+  jitterBps: 2000
+links:
+  s3ExpirySeconds: 604800
+budget:
+  monthlyCapMicroInr: 300000000
+  warningThresholdMicroInr: 240000000
+  suspensionThresholdMicroInr: 270000000
+  operationalReserveMicroInr: 10000000
+  safetyMarginBps: 2000
