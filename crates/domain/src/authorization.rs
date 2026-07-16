@@ -2,8 +2,11 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 
-use crate::identity::{ChatId, ParticipantId};
-use crate::workflow::{Workflow, WorkflowTimestamp};
+use crate::identity::{ChatId, MessageId, ParticipantId, TopicSessionId};
+use crate::transition::{
+    TransitionError, TransitionOutcome, TransitionRequest, WorkflowTransition,
+};
+use crate::workflow::{Workflow, WorkflowRevision, WorkflowTimestamp};
 
 /// Cached approval expires at this age; evidence must be strictly younger.
 pub const MAX_CACHED_MEMBERSHIP_AGE_SECONDS: u64 = 30 * 60;
@@ -175,6 +178,156 @@ impl AuthorizedWorkflowAction {
     pub const fn authorization_source(&self) -> MembershipAuthorizationSource {
         self.authorization_source
     }
+}
+
+/// Topic-qualified optimistic transition inputs for an approved participant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizedTransitionRequest {
+    pub expected_workflow_revision: WorkflowRevision,
+    pub topic: TopicSessionId,
+    pub source_message: MessageId,
+    pub timestamp: WorkflowTimestamp,
+}
+
+/// Durable membership attribution emitted for an authorized participant action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AuthorizedActionAudit {
+    pub actor: ParticipantId,
+    pub topic: TopicSessionId,
+    pub source_message: MessageId,
+    pub authorized_at: WorkflowTimestamp,
+    pub membership_source: MembershipAuthorizationSource,
+}
+
+/// State transition and membership attribution that must be persisted together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthorizedTransitionOutcome {
+    pub transition: TransitionOutcome,
+    pub authorization: AuthorizedActionAudit,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthorizedActionError {
+    AuthorizationNotCurrent {
+        authorized_at: WorkflowTimestamp,
+        attempted_at: WorkflowTimestamp,
+    },
+    ForumMismatch {
+        expected: ChatId,
+        actual: ChatId,
+    },
+    TopicMismatch {
+        expected: TopicSessionId,
+        actual: TopicSessionId,
+    },
+    Transition(TransitionError),
+}
+
+impl From<TransitionError> for AuthorizedActionError {
+    fn from(value: TransitionError) -> Self {
+        Self::Transition(value)
+    }
+}
+
+impl Display for AuthorizedActionError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "authorized action rejected: {self:?}")
+    }
+}
+
+impl std::error::Error for AuthorizedActionError {}
+
+impl Workflow {
+    /// Stop a workflow using a current participant capability bound to its topic.
+    pub fn stop_authorized(
+        &self,
+        authorization: &AuthorizedParticipant,
+        request: AuthorizedTransitionRequest,
+    ) -> Result<AuthorizedTransitionOutcome, AuthorizedActionError> {
+        validate_authorized_action(
+            self,
+            authorization.approved_forum,
+            authorization.authorized_at,
+            request.topic,
+            request.timestamp,
+        )?;
+        let transition = self.transition_with_confirmation_boundary(TransitionRequest {
+            transition: WorkflowTransition::StopWorkflow,
+            expected_revision: request.expected_workflow_revision,
+            actor: authorization.actor,
+            source_message: request.source_message,
+            timestamp: request.timestamp,
+        })?;
+        let audit = AuthorizedActionAudit {
+            actor: authorization.actor,
+            topic: request.topic,
+            source_message: request.source_message,
+            authorized_at: authorization.authorized_at,
+            membership_source: authorization.authorization_source,
+        };
+        Ok(AuthorizedTransitionOutcome {
+            transition,
+            authorization: audit,
+        })
+    }
+}
+
+pub(crate) fn validate_authorized_workflow_action(
+    workflow: &Workflow,
+    authorization: &AuthorizedWorkflowAction,
+    topic: TopicSessionId,
+    attempted_at: WorkflowTimestamp,
+) -> Result<(), AuthorizedActionError> {
+    validate_authorized_action(
+        workflow,
+        authorization.approved_forum,
+        authorization.authorized_at,
+        topic,
+        attempted_at,
+    )
+}
+
+pub(crate) fn authorized_workflow_action_audit(
+    authorization: &AuthorizedWorkflowAction,
+    topic: TopicSessionId,
+    source_message: MessageId,
+) -> AuthorizedActionAudit {
+    AuthorizedActionAudit {
+        actor: authorization.actor,
+        topic,
+        source_message,
+        authorized_at: authorization.authorized_at,
+        membership_source: authorization.authorization_source,
+    }
+}
+
+fn validate_authorized_action(
+    workflow: &Workflow,
+    approved_forum: ChatId,
+    authorized_at: WorkflowTimestamp,
+    topic: TopicSessionId,
+    attempted_at: WorkflowTimestamp,
+) -> Result<(), AuthorizedActionError> {
+    if authorized_at != attempted_at {
+        return Err(AuthorizedActionError::AuthorizationNotCurrent {
+            authorized_at,
+            attempted_at,
+        });
+    }
+    if workflow.topic() != topic {
+        return Err(AuthorizedActionError::TopicMismatch {
+            expected: workflow.topic(),
+            actual: topic,
+        });
+    }
+    if approved_forum != topic.chat_id() {
+        return Err(AuthorizedActionError::ForumMismatch {
+            expected: topic.chat_id(),
+            actual: approved_forum,
+        });
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -4,16 +4,16 @@ use domain::authorization::{
     authorize_participant_from_cache,
 };
 use domain::confirmation::{
-    ConfirmationAction, ConfirmationConsumeRequest, ConfirmationError, ConfirmationIssueRequest,
-    ConfirmationRecord, ConfirmationStatus, MutationTargetFingerprint, PreviewDigest,
-    TopicMessageReference,
+    ConfirmationAction, ConfirmationConsumeRequest, ConfirmationCorrectionRequest,
+    ConfirmationError, ConfirmationIssueRequest, ConfirmationRecord, ConfirmationStatus,
+    MutationTargetFingerprint, PreviewDigest, TopicMessageReference,
 };
 use domain::identity::{
     ChatId, ConfirmationId, MessageId, MessageThreadId, ParticipantId, TopicSessionId, WorkflowId,
 };
 use domain::{
-    TransitionError, TransitionRequest, WaitDeadline, Workflow, WorkflowRevision, WorkflowState,
-    WorkflowTimestamp, WorkflowTransition,
+    AuthorizedTransitionRequest, TransitionError, TransitionRequest, WaitDeadline, Workflow,
+    WorkflowRevision, WorkflowState, WorkflowTimestamp, WorkflowTransition,
 };
 
 fn time(seconds: u64) -> WorkflowTimestamp {
@@ -326,12 +326,48 @@ fn outage_cache_can_authorize_confirmation_and_is_recorded()
 }
 
 #[test]
+fn outage_cache_can_authorize_correction_and_is_recorded() -> Result<(), Box<dyn std::error::Error>>
+{
+    let (workflow, confirmation) = issued_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
+    let actor = participant(202)?;
+    let forum = ChatId::new(-1001);
+    let live = LiveMembershipEvidence::new(forum, actor, MembershipStatus::Approved, time(7));
+    let cached = CachedMembershipApproval::from_live(&live)?;
+    let outage =
+        MembershipLookupOutage::new(forum, actor, MembershipLookupOutageKind::Timeout, time(8));
+    let authorized = authorize_participant_from_cache(forum, actor, &cached, &outage, time(8))?;
+
+    let corrected = confirmation.correct(
+        &workflow,
+        &authorized.for_workflow(&workflow),
+        ConfirmationCorrectionRequest {
+            source: TopicMessageReference::new(workflow.topic(), MessageId::new(8)?),
+            corrected_at: time(8),
+        },
+    )?;
+    assert_eq!(
+        corrected.authorization.membership_source,
+        MembershipAuthorizationSource::OutageCache {
+            live_observed_at: time(7),
+            outage: MembershipLookupOutageKind::Timeout,
+        }
+    );
+    assert_eq!(
+        corrected.transition.workflow.state(),
+        &WorkflowState::CalculationOrDraftingStarted
+    );
+    Ok(())
+}
+
+#[test]
 fn generic_transitions_cannot_bypass_confirmation() -> Result<(), Box<dyn std::error::Error>> {
     let (workflow, _) = issued_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
     for transition in [
+        WorkflowTransition::ApplyCorrection,
         WorkflowTransition::StartSheetOrDocWrite,
         WorkflowTransition::StartPdfGeneration,
         WorkflowTransition::StartCalendarOrEmailAction,
+        WorkflowTransition::StopWorkflow,
     ] {
         let result = workflow.transition(TransitionRequest {
             transition,
@@ -420,7 +456,30 @@ fn stopped_corrected_and_mismatched_workflows_invalidate_confirmation()
     let (workflow, confirmation) = issued_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
     let authorization = authorized_action(&workflow, 202, -1001, 8)?;
 
-    let stopped = advance(&workflow, WorkflowTransition::StopWorkflow, 8)?;
+    let actor = participant(202)?;
+    let participant_authorization = authorize_participant(
+        ChatId::new(-1001),
+        actor,
+        &LiveMembershipEvidence::new(
+            ChatId::new(-1001),
+            actor,
+            MembershipStatus::Approved,
+            time(8),
+        ),
+        time(8),
+    )?;
+    let stopped = workflow
+        .stop_authorized(
+            &participant_authorization,
+            AuthorizedTransitionRequest {
+                expected_workflow_revision: workflow.revision(),
+                topic: workflow.topic(),
+                source_message: MessageId::new(8)?,
+                timestamp: time(8),
+            },
+        )?
+        .transition
+        .workflow;
     assert!(matches!(
         confirmation.consume(&stopped, &authorization, consume_request(8)?),
         Err(ConfirmationError::WorkflowNotWaiting { .. })
@@ -439,7 +498,20 @@ fn stopped_corrected_and_mismatched_workflows_invalidate_confirmation()
         Err(ConfirmationError::WorkflowNotWaiting { .. })
     ));
 
-    let corrected = advance(&workflow, WorkflowTransition::ApplyCorrection, 8)?;
+    let corrected_outcome = confirmation.correct(
+        &workflow,
+        &authorization,
+        ConfirmationCorrectionRequest {
+            source: TopicMessageReference::new(workflow.topic(), MessageId::new(8)?),
+            corrected_at: time(8),
+        },
+    )?;
+    assert_eq!(corrected_outcome.authorization.actor, participant(202)?);
+    assert_eq!(
+        corrected_outcome.precondition.expected_workflow_revision,
+        workflow.revision()
+    );
+    let corrected = corrected_outcome.transition.workflow;
     assert!(matches!(
         confirmation.consume(&corrected, &authorization, consume_request(8)?),
         Err(ConfirmationError::WorkflowNotWaiting { .. })
@@ -454,6 +526,13 @@ fn stopped_corrected_and_mismatched_workflows_invalidate_confirmation()
     assert!(matches!(
         confirmation.consume(&other_id, &authorization, consume_request(8)?),
         Err(ConfirmationError::WorkflowMismatch)
+    ));
+
+    let other_topic =
+        workflow_with_json_value(&workflow, "/topic/message_thread_id", serde_json::json!(88))?;
+    assert!(matches!(
+        confirmation.consume(&other_topic, &authorization, consume_request(8)?),
+        Err(ConfirmationError::TopicMismatch { .. })
     ));
 
     let other_owner = Workflow::new(

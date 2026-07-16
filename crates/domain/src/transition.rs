@@ -260,6 +260,8 @@ impl Workflow {
         if matches!(
             request.transition,
             WorkflowTransition::RequestConfirmation { .. }
+                | WorkflowTransition::ApplyCorrection
+                | WorkflowTransition::StopWorkflow
         ) || matches!(self.state(), WorkflowState::WaitingForConfirmation { .. })
             && matches!(
                 request.transition,

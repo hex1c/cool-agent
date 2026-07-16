@@ -2,7 +2,11 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 
-use crate::authorization::{AuthorizedWorkflowAction, MembershipAuthorizationSource};
+use crate::authorization::{
+    AuthorizedActionAudit, AuthorizedActionError, AuthorizedWorkflowAction,
+    MembershipAuthorizationSource, authorized_workflow_action_audit,
+    validate_authorized_workflow_action,
+};
 use crate::identity::{ConfirmationId, MessageId, ParticipantId, TopicSessionId, WorkflowId};
 use crate::transition::{
     TransitionError, TransitionOutcome, TransitionRequest, WorkflowTransition,
@@ -181,6 +185,49 @@ impl ConfirmationRecord {
         }
     }
 
+    /// Apply an approved correction and invalidate this pending revision.
+    pub fn correct(
+        &self,
+        workflow: &Workflow,
+        authorization: &AuthorizedWorkflowAction,
+        request: ConfirmationCorrectionRequest,
+    ) -> Result<ConfirmationCorrectionOutcome, ConfirmationError> {
+        let pending = match self {
+            Self::Pending(pending) => pending,
+            Self::Consumed(_) => return Err(ConfirmationError::AlreadyConsumed),
+        };
+        validate_authorized_workflow_action(
+            workflow,
+            authorization,
+            request.source.topic,
+            request.corrected_at,
+        )?;
+        validate_pending_workflow(pending, workflow, authorization, request.corrected_at)?;
+
+        let transition = workflow.transition_with_confirmation_boundary(TransitionRequest {
+            transition: WorkflowTransition::ApplyCorrection,
+            expected_revision: pending.workflow_revision,
+            actor: authorization.actor(),
+            source_message: request.source.message_id,
+            timestamp: request.corrected_at,
+        })?;
+        let precondition = ConfirmationConsumePrecondition {
+            expected_workflow_revision: pending.workflow_revision,
+            confirmation_id: pending.confirmation_id.clone(),
+            expected_confirmation_status: ConfirmationStatus::Pending,
+        };
+        let audit = authorized_workflow_action_audit(
+            authorization,
+            request.source.topic,
+            request.source.message_id,
+        );
+        Ok(ConfirmationCorrectionOutcome {
+            transition,
+            authorization: audit,
+            precondition,
+        })
+    }
+
     /// Validate and consume a confirmation, returning writes that must commit atomically.
     pub fn consume(
         &self,
@@ -211,48 +258,7 @@ impl ConfirmationRecord {
                 actual: request.source.topic,
             });
         }
-        if workflow.id() != &pending.workflow_id {
-            return Err(ConfirmationError::WorkflowMismatch);
-        }
-        if workflow.owner() != pending.owner {
-            return Err(ConfirmationError::OwnerMismatch {
-                expected: pending.owner,
-                actual: workflow.owner(),
-            });
-        }
-        if authorization.google_principal() != pending.owner {
-            return Err(ConfirmationError::OwnerMismatch {
-                expected: pending.owner,
-                actual: authorization.google_principal(),
-            });
-        }
-
-        let workflow_deadline = match workflow.state() {
-            WorkflowState::WaitingForConfirmation { deadline } => *deadline,
-            state => {
-                return Err(ConfirmationError::WorkflowNotWaiting {
-                    state: state.kind(),
-                });
-            }
-        };
-        if workflow_deadline != pending.expires_at {
-            return Err(ConfirmationError::DeadlineMismatch {
-                expected: pending.expires_at,
-                actual: workflow_deadline,
-            });
-        }
-        if workflow.revision() != pending.workflow_revision {
-            return Err(ConfirmationError::RevisionMismatch {
-                expected: pending.workflow_revision,
-                actual: workflow.revision(),
-            });
-        }
-        if pending.expires_at.has_elapsed(request.confirmed_at) {
-            return Err(ConfirmationError::Expired {
-                expired_at: pending.expires_at,
-                attempted_at: request.confirmed_at,
-            });
-        }
+        validate_pending_workflow(pending, workflow, authorization, request.confirmed_at)?;
         if request.preview_digest != pending.preview_digest {
             return Err(ConfirmationError::PreviewDigestMismatch);
         }
@@ -294,6 +300,78 @@ impl ConfirmationRecord {
             precondition,
         })
     }
+}
+
+fn validate_pending_workflow(
+    pending: &PendingConfirmation,
+    workflow: &Workflow,
+    authorization: &AuthorizedWorkflowAction,
+    attempted_at: WorkflowTimestamp,
+) -> Result<(), ConfirmationError> {
+    if workflow.id() != &pending.workflow_id {
+        return Err(ConfirmationError::WorkflowMismatch);
+    }
+    if workflow.topic() != pending.topic {
+        return Err(ConfirmationError::TopicMismatch {
+            expected: pending.topic,
+            actual: workflow.topic(),
+        });
+    }
+    if workflow.owner() != pending.owner {
+        return Err(ConfirmationError::OwnerMismatch {
+            expected: pending.owner,
+            actual: workflow.owner(),
+        });
+    }
+    if authorization.google_principal() != pending.owner {
+        return Err(ConfirmationError::OwnerMismatch {
+            expected: pending.owner,
+            actual: authorization.google_principal(),
+        });
+    }
+
+    let workflow_deadline = match workflow.state() {
+        WorkflowState::WaitingForConfirmation { deadline } => *deadline,
+        state => {
+            return Err(ConfirmationError::WorkflowNotWaiting {
+                state: state.kind(),
+            });
+        }
+    };
+    if workflow_deadline != pending.expires_at {
+        return Err(ConfirmationError::DeadlineMismatch {
+            expected: pending.expires_at,
+            actual: workflow_deadline,
+        });
+    }
+    if workflow.revision() != pending.workflow_revision {
+        return Err(ConfirmationError::RevisionMismatch {
+            expected: pending.workflow_revision,
+            actual: workflow.revision(),
+        });
+    }
+    if pending.expires_at.has_elapsed(attempted_at) {
+        return Err(ConfirmationError::Expired {
+            expired_at: pending.expires_at,
+            attempted_at,
+        });
+    }
+    Ok(())
+}
+
+/// Inputs for an approved correction that invalidates the current preview.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmationCorrectionRequest {
+    pub source: TopicMessageReference,
+    pub corrected_at: WorkflowTimestamp,
+}
+
+/// Authorized correction and conditional-write evidence persisted together.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfirmationCorrectionOutcome {
+    pub transition: TransitionOutcome,
+    pub authorization: AuthorizedActionAudit,
+    pub precondition: ConfirmationConsumePrecondition,
 }
 
 /// Callback values checked against the durable pending binding.
@@ -359,7 +437,14 @@ pub enum ConfirmationError {
     },
     PreviewDigestMismatch,
     MutationTargetMismatch,
+    AuthorizedAction(AuthorizedActionError),
     Transition(TransitionError),
+}
+
+impl From<AuthorizedActionError> for ConfirmationError {
+    fn from(value: AuthorizedActionError) -> Self {
+        Self::AuthorizedAction(value)
+    }
 }
 
 impl From<TransitionError> for ConfirmationError {
