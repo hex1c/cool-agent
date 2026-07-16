@@ -138,7 +138,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 ### Phase 2: Domain and Persistence Safety
 
 - [x] Task 14: Implement domain identities and topic routing
-- [ ] Task 15: Implement the workflow state machine
+- [x] Task 15: Implement the workflow state machine
 - [ ] Task 16: Implement live membership authorization and revision-bound confirmation
 - [ ] Task 17: Implement idempotency and retry policy
 - [ ] Task 18: Implement the budget decision policy

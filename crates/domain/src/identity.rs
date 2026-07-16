@@ -60,40 +60,45 @@ macro_rules! string_identity {
 string_identity!(WorkflowId, "workflow id");
 string_identity!(AttachmentId, "attachment id");
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[serde(transparent)]
-pub struct ParticipantId(i64);
+macro_rules! positive_i64_identity {
+    ($name:ident, $kind:literal) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+        #[serde(transparent)]
+        pub struct $name(i64);
 
-impl ParticipantId {
-    pub fn new(value: i64) -> Result<Self, IdentityError> {
-        if value <= 0 {
-            return Err(IdentityError::InvalidNumeric {
-                kind: "participant id",
-            });
+        impl $name {
+            pub fn new(value: i64) -> Result<Self, IdentityError> {
+                if value <= 0 {
+                    return Err(IdentityError::InvalidNumeric { kind: $kind });
+                }
+                Ok(Self(value))
+            }
+
+            pub const fn get(self) -> i64 {
+                self.0
+            }
         }
-        Ok(Self(value))
-    }
 
-    pub const fn get(self) -> i64 {
-        self.0
-    }
+        impl Display for $name {
+            fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+                self.0.fmt(formatter)
+            }
+        }
+
+        impl<'de> serde::Deserialize<'de> for $name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = i64::deserialize(deserializer)?;
+                Self::new(value).map_err(serde::de::Error::custom)
+            }
+        }
+    };
 }
 
-impl Display for ParticipantId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for ParticipantId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = i64::deserialize(deserializer)?;
-        Self::new(value).map_err(serde::de::Error::custom)
-    }
-}
+positive_i64_identity!(MessageId, "message id");
+positive_i64_identity!(ParticipantId, "participant id");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -115,40 +120,7 @@ impl Display for ChatId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
-#[serde(transparent)]
-pub struct MessageThreadId(i64);
-
-impl MessageThreadId {
-    pub fn new(value: i64) -> Result<Self, IdentityError> {
-        if value <= 0 {
-            return Err(IdentityError::InvalidNumeric {
-                kind: "message thread id",
-            });
-        }
-        Ok(Self(value))
-    }
-
-    pub const fn get(self) -> i64 {
-        self.0
-    }
-}
-
-impl Display for MessageThreadId {
-    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        self.0.fmt(formatter)
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for MessageThreadId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let value = i64::deserialize(deserializer)?;
-        Self::new(value).map_err(serde::de::Error::custom)
-    }
-}
+positive_i64_identity!(MessageThreadId, "message thread id");
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -176,7 +148,9 @@ impl TopicSessionId {
 
 #[cfg(test)]
 mod tests {
-    use super::{AttachmentId, IdentityError, MessageThreadId, ParticipantId, WorkflowId};
+    use super::{
+        AttachmentId, IdentityError, MessageId, MessageThreadId, ParticipantId, WorkflowId,
+    };
 
     #[test]
     fn identity_types_reject_empty_or_invalid_values() {
@@ -189,6 +163,7 @@ mod tests {
             Err(IdentityError::Empty { .. })
         ));
         assert!(ParticipantId::new(0).is_err());
+        assert!(MessageId::new(0).is_err());
         assert!(MessageThreadId::new(-1).is_err());
     }
 
@@ -196,8 +171,10 @@ mod tests {
     fn identity_types_keep_values_typed() {
         let workflow = WorkflowId::new("workflow-1");
         let participant = ParticipantId::new(42);
+        let message = MessageId::new(7);
         assert!(matches!(workflow, Ok(ref w) if w.as_str() == "workflow-1"));
         assert!(matches!(participant, Ok(p) if p.get() == 42));
+        assert!(matches!(message, Ok(m) if m.get() == 7));
     }
 
     #[test]
@@ -210,6 +187,9 @@ mod tests {
 
         let zero: Result<ParticipantId, _> = serde_json::from_str("0");
         assert!(zero.is_err());
+
+        let invalid_message: Result<MessageId, _> = serde_json::from_str("-1");
+        assert!(invalid_message.is_err());
 
         let negative: Result<MessageThreadId, _> = serde_json::from_str("-1");
         assert!(negative.is_err());
@@ -224,5 +204,12 @@ mod tests {
         let deser_pid: Result<ParticipantId, _> = serde_json::from_str("42");
         let ctor_pid = ParticipantId::new(42);
         assert!(matches!((&deser_pid, &ctor_pid), (Ok(d), Ok(c)) if d == c));
+
+        let deser_message: Result<MessageId, _> = serde_json::from_str("7");
+        let ctor_message = MessageId::new(7);
+        assert!(matches!(
+            (&deser_message, &ctor_message),
+            (Ok(deserialized), Ok(constructed)) if deserialized == constructed
+        ));
     }
 }
