@@ -3,6 +3,7 @@
 //! Pure workflow and policy contracts.
 
 pub mod attachment;
+pub mod authorization;
 pub mod contracts;
 pub mod identity;
 pub mod money;
@@ -10,6 +11,10 @@ pub mod routing;
 pub mod transition;
 pub mod workflow;
 
+pub use authorization::{
+    AuthorizationError, AuthorizedParticipant, AuthorizedWorkflowAction, LiveMembershipEvidence,
+    MembershipStatus, authorize_participant,
+};
 pub use transition::{
     TransitionAudit, TransitionError, TransitionOutcome, TransitionRequest, WorkflowTransition,
     WorkflowTransitionKind,
