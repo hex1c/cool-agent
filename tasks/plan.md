@@ -110,7 +110,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 ### Phase 0: Fail-Fast Feasibility
 
 - [ ] Task 1: Validate tagged Telegram forum turns and retained image behavior
-- [ ] Task 2: Freeze one-workflow-per-topic and confirmation semantics
+- [x] Task 2: Freeze one-workflow-per-topic and confirmation semantics
 - [ ] Task 3: Prove Rust 1.97 Lambda builds through SAM with `cargo-lambda`
 - [ ] Task 4: Analyze quotation pagination and select a Lambda-compatible renderer
 - [ ] Task 5: Benchmark basic-reasoning AI models and Pi compatibility
@@ -143,7 +143,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 - [x] Task 14: Implement domain identities and topic routing
 - [x] Task 15: Implement the workflow state machine
-- [ ] Task 16: Implement live membership authorization and revision-bound confirmation
+- [x] Task 16: Implement live membership authorization and revision-bound confirmation
 - [ ] Task 17: Implement idempotency and retry policy
 - [ ] Task 18: Implement the budget decision policy
 - [ ] Task 19: Define persistence ports and DynamoDB keys
