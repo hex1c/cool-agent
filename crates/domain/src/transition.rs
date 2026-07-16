@@ -172,6 +172,9 @@ pub enum TransitionError {
         from: WorkflowStateKind,
         transition: WorkflowTransitionKind,
     },
+    ConfirmationBoundaryRequired {
+        transition: WorkflowTransitionKind,
+    },
     RevisionExhausted,
 }
 
@@ -229,6 +232,10 @@ impl Display for TransitionError {
                     "transition {transition:?} is illegal from {from:?}"
                 )
             }
+            Self::ConfirmationBoundaryRequired { transition } => write!(
+                formatter,
+                "transition {transition:?} requires the confirmation boundary"
+            ),
             Self::RevisionExhausted => formatter.write_str("workflow revision exhausted"),
         }
     }
@@ -239,6 +246,21 @@ impl std::error::Error for TransitionError {}
 impl Workflow {
     /// Apply one pure, optimistic transition without mutating the current aggregate.
     pub fn transition(
+        &self,
+        request: TransitionRequest,
+    ) -> Result<TransitionOutcome, TransitionError> {
+        if matches!(
+            request.transition,
+            WorkflowTransition::RequestConfirmation { .. }
+        ) {
+            return Err(TransitionError::ConfirmationBoundaryRequired {
+                transition: request.transition.kind(),
+            });
+        }
+        self.transition_with_confirmation_boundary(request)
+    }
+
+    pub(crate) fn transition_with_confirmation_boundary(
         &self,
         request: TransitionRequest,
     ) -> Result<TransitionOutcome, TransitionError> {

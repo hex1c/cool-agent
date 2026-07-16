@@ -4,6 +4,7 @@
 
 pub mod attachment;
 pub mod authorization;
+pub mod confirmation;
 pub mod contracts;
 pub mod identity;
 pub mod money;
@@ -14,6 +15,10 @@ pub mod workflow;
 pub use authorization::{
     AuthorizationError, AuthorizedParticipant, AuthorizedWorkflowAction, LiveMembershipEvidence,
     MembershipStatus, authorize_participant,
+};
+pub use confirmation::{
+    ConfirmationAction, ConfirmationIssueOutcome, ConfirmationIssuePrecondition,
+    ConfirmationIssueRequest, MutationTargetFingerprint, PendingConfirmation, PreviewDigest,
 };
 pub use transition::{
     TransitionAudit, TransitionError, TransitionOutcome, TransitionRequest, WorkflowTransition,

@@ -59,6 +59,7 @@ macro_rules! string_identity {
 
 string_identity!(WorkflowId, "workflow id");
 string_identity!(AttachmentId, "attachment id");
+string_identity!(ConfirmationId, "confirmation id");
 
 macro_rules! positive_i64_identity {
     ($name:ident, $kind:literal) => {

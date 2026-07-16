@@ -1,5 +1,8 @@
-use domain::identity::{MessageId, ParticipantId, WorkflowId};
+use domain::identity::{
+    ChatId, ConfirmationId, MessageId, MessageThreadId, ParticipantId, TopicSessionId, WorkflowId,
+};
 use domain::{
+    ConfirmationAction, ConfirmationIssueRequest, MutationTargetFingerprint, PreviewDigest,
     TransitionAudit, TransitionError, TransitionOutcome, TransitionRequest, WaitDeadline, Workflow,
     WorkflowRevision, WorkflowState, WorkflowStateKind, WorkflowTimestamp, WorkflowTransition,
 };
@@ -42,6 +45,28 @@ fn advance(
     Ok(apply(workflow, transition, at)?.workflow)
 }
 
+fn request_confirmation(
+    workflow: &Workflow,
+    at: u64,
+    expires_at: u64,
+) -> Result<Workflow, Box<dyn std::error::Error>> {
+    Ok(workflow
+        .issue_confirmation(ConfirmationIssueRequest {
+            confirmation_id: ConfirmationId::new(format!("confirmation-{at}"))?,
+            expected_workflow_revision: workflow.revision(),
+            topic: TopicSessionId::new(ChatId::new(-1001), MessageThreadId::new(77)?),
+            preview_digest: PreviewDigest::new([1; 32]),
+            mutation_target: MutationTargetFingerprint::new([2; 32]),
+            action: ConfirmationAction::StartSheetOrDocWrite,
+            deadline: deadline(expires_at),
+            actor: ParticipantId::new(202)?,
+            source_message: MessageId::new(i64::try_from(at)?)?,
+            timestamp: time(at),
+        })?
+        .transition
+        .workflow)
+}
+
 fn drafting_completed() -> Result<Workflow, Box<dyn std::error::Error>> {
     let workflow = workflow()?;
     let workflow = advance(
@@ -63,13 +88,7 @@ fn drafting_completed() -> Result<Workflow, Box<dyn std::error::Error>> {
 
 fn waiting_for_confirmation() -> Result<Workflow, Box<dyn std::error::Error>> {
     let workflow = drafting_completed()?;
-    advance(
-        &workflow,
-        WorkflowTransition::RequestConfirmation {
-            deadline: deadline(100),
-        },
-        7,
-    )
+    request_confirmation(&workflow, 7, 100)
 }
 
 #[test]
@@ -117,13 +136,7 @@ fn workflow_state_quotation_branch_reports_every_stage_and_audit_metadata()
         workflow.state(),
         &WorkflowState::CalculationOrDraftingCompleted
     );
-    let workflow = advance(
-        &workflow,
-        WorkflowTransition::RequestConfirmation {
-            deadline: deadline(100),
-        },
-        7,
-    )?;
+    let workflow = request_confirmation(&workflow, 7, 100)?;
     assert!(matches!(
         workflow.state(),
         WorkflowState::WaitingForConfirmation { .. }
@@ -258,13 +271,7 @@ fn workflow_state_clarification_and_correction_loops_resume_the_right_stage()
         WorkflowTransition::CompleteCalculationOrDrafting,
         21,
     )?;
-    let confirmation = advance(
-        &drafted,
-        WorkflowTransition::RequestConfirmation {
-            deadline: deadline(30),
-        },
-        22,
-    )?;
+    let confirmation = request_confirmation(&drafted, 22, 30)?;
     let corrected = advance(&confirmation, WorkflowTransition::ApplyCorrection, 23)?;
     assert_eq!(
         corrected.state(),
