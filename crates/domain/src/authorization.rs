@@ -1,7 +1,12 @@
 use std::fmt::{Display, Formatter};
 
+use serde::{Deserialize, Serialize};
+
 use crate::identity::{ChatId, ParticipantId};
 use crate::workflow::{Workflow, WorkflowTimestamp};
+
+/// Cached approval expires at this age; evidence must be strictly younger.
+pub const MAX_CACHED_MEMBERSHIP_AGE_SECONDS: u64 = 30 * 60;
 
 /// Normalized result of a live membership lookup in the approved forum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,9 +16,6 @@ pub enum MembershipStatus {
 }
 
 /// Ephemeral evidence returned by the live Telegram membership boundary.
-///
-/// This type is deliberately not serializable: Task 16 defaults to a fresh live
-/// check for every sensitive action until an outage-cache duration is approved.
 #[derive(Debug, PartialEq, Eq)]
 pub struct LiveMembershipEvidence {
     forum: ChatId,
@@ -38,12 +40,79 @@ impl LiveMembershipEvidence {
     }
 }
 
-/// A participant capability produced only from current, group-bound evidence.
+/// Persistable positive result from a prior live membership lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CachedMembershipApproval {
+    forum: ChatId,
+    participant: ParticipantId,
+    live_observed_at: WorkflowTimestamp,
+}
+
+impl CachedMembershipApproval {
+    pub fn from_live(evidence: &LiveMembershipEvidence) -> Result<Self, AuthorizationError> {
+        if evidence.status != MembershipStatus::Approved {
+            return Err(AuthorizationError::NotApproved);
+        }
+        Ok(Self {
+            forum: evidence.forum,
+            participant: evidence.participant,
+            live_observed_at: evidence.observed_at,
+        })
+    }
+}
+
+/// Connection-level Telegram membership lookup failures eligible for fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MembershipLookupOutageKind {
+    Timeout,
+    ConnectionFailure,
+}
+
+/// Evidence that a live membership lookup was unresponsive at action time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MembershipLookupOutage {
+    forum: ChatId,
+    participant: ParticipantId,
+    kind: MembershipLookupOutageKind,
+    observed_at: WorkflowTimestamp,
+}
+
+impl MembershipLookupOutage {
+    pub const fn new(
+        forum: ChatId,
+        participant: ParticipantId,
+        kind: MembershipLookupOutageKind,
+        observed_at: WorkflowTimestamp,
+    ) -> Self {
+        Self {
+            forum,
+            participant,
+            kind,
+            observed_at,
+        }
+    }
+}
+
+/// Membership evidence source retained for authorization audit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum MembershipAuthorizationSource {
+    Live,
+    OutageCache {
+        live_observed_at: WorkflowTimestamp,
+        outage: MembershipLookupOutageKind,
+    },
+}
+
+/// A participant capability produced only from accepted, group-bound evidence.
 #[derive(Debug, PartialEq, Eq)]
 pub struct AuthorizedParticipant {
     actor: ParticipantId,
     approved_forum: ChatId,
     authorized_at: WorkflowTimestamp,
+    authorization_source: MembershipAuthorizationSource,
 }
 
 impl AuthorizedParticipant {
@@ -55,6 +124,7 @@ impl AuthorizedParticipant {
             google_principal: workflow.owner(),
             approved_forum: self.approved_forum,
             authorized_at: self.authorized_at,
+            authorization_source: self.authorization_source,
         }
     }
 
@@ -69,6 +139,10 @@ impl AuthorizedParticipant {
     pub const fn authorized_at(&self) -> WorkflowTimestamp {
         self.authorized_at
     }
+
+    pub const fn authorization_source(&self) -> MembershipAuthorizationSource {
+        self.authorization_source
+    }
 }
 
 /// Authorized workflow action with Google access fixed to the workflow owner.
@@ -78,6 +152,7 @@ pub struct AuthorizedWorkflowAction {
     google_principal: ParticipantId,
     approved_forum: ChatId,
     authorized_at: WorkflowTimestamp,
+    authorization_source: MembershipAuthorizationSource,
 }
 
 impl AuthorizedWorkflowAction {
@@ -96,6 +171,10 @@ impl AuthorizedWorkflowAction {
     pub const fn authorized_at(&self) -> WorkflowTimestamp {
         self.authorized_at
     }
+
+    pub const fn authorization_source(&self) -> MembershipAuthorizationSource {
+        self.authorization_source
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +190,19 @@ pub enum AuthorizationError {
     EvidenceNotCurrent {
         observed_at: WorkflowTimestamp,
         evaluated_at: WorkflowTimestamp,
+    },
+    OutageNotCurrent {
+        observed_at: WorkflowTimestamp,
+        evaluated_at: WorkflowTimestamp,
+    },
+    CachedApprovalFromFuture {
+        observed_at: WorkflowTimestamp,
+        evaluated_at: WorkflowTimestamp,
+    },
+    CachedApprovalExpired {
+        observed_at: WorkflowTimestamp,
+        evaluated_at: WorkflowTimestamp,
+        maximum_age_seconds: u64,
     },
     NotApproved,
 }
@@ -135,6 +227,34 @@ impl Display for AuthorizationError {
                 observed_at.as_unix_seconds(),
                 evaluated_at.as_unix_seconds()
             ),
+            Self::OutageNotCurrent {
+                observed_at,
+                evaluated_at,
+            } => write!(
+                formatter,
+                "membership outage timestamp {} does not match evaluation timestamp {}",
+                observed_at.as_unix_seconds(),
+                evaluated_at.as_unix_seconds()
+            ),
+            Self::CachedApprovalFromFuture {
+                observed_at,
+                evaluated_at,
+            } => write!(
+                formatter,
+                "cached membership approval timestamp {} is after evaluation timestamp {}",
+                observed_at.as_unix_seconds(),
+                evaluated_at.as_unix_seconds()
+            ),
+            Self::CachedApprovalExpired {
+                observed_at,
+                evaluated_at,
+                maximum_age_seconds,
+            } => write!(
+                formatter,
+                "cached membership approval from {} is not younger than {maximum_age_seconds} seconds at {}",
+                observed_at.as_unix_seconds(),
+                evaluated_at.as_unix_seconds()
+            ),
             Self::NotApproved => formatter.write_str("participant is not an approved forum member"),
         }
     }
@@ -149,18 +269,7 @@ pub fn authorize_participant(
     evidence: &LiveMembershipEvidence,
     evaluated_at: WorkflowTimestamp,
 ) -> Result<AuthorizedParticipant, AuthorizationError> {
-    if evidence.forum != approved_forum {
-        return Err(AuthorizationError::ForumMismatch {
-            expected: approved_forum,
-            actual: evidence.forum,
-        });
-    }
-    if evidence.participant != actor {
-        return Err(AuthorizationError::ParticipantMismatch {
-            expected: actor,
-            actual: evidence.participant,
-        });
-    }
+    validate_identity_binding(approved_forum, actor, evidence.forum, evidence.participant)?;
     if evidence.observed_at != evaluated_at {
         return Err(AuthorizationError::EvidenceNotCurrent {
             observed_at: evidence.observed_at,
@@ -175,5 +284,69 @@ pub fn authorize_participant(
         actor,
         approved_forum,
         authorized_at: evaluated_at,
+        authorization_source: MembershipAuthorizationSource::Live,
     })
+}
+
+/// Authorize from a prior positive lookup only during a current connection outage.
+pub fn authorize_participant_from_cache(
+    approved_forum: ChatId,
+    actor: ParticipantId,
+    cached: &CachedMembershipApproval,
+    outage: &MembershipLookupOutage,
+    evaluated_at: WorkflowTimestamp,
+) -> Result<AuthorizedParticipant, AuthorizationError> {
+    validate_identity_binding(approved_forum, actor, cached.forum, cached.participant)?;
+    validate_identity_binding(approved_forum, actor, outage.forum, outage.participant)?;
+    if outage.observed_at != evaluated_at {
+        return Err(AuthorizationError::OutageNotCurrent {
+            observed_at: outage.observed_at,
+            evaluated_at,
+        });
+    }
+    if cached.live_observed_at > evaluated_at {
+        return Err(AuthorizationError::CachedApprovalFromFuture {
+            observed_at: cached.live_observed_at,
+            evaluated_at,
+        });
+    }
+    let age_seconds = evaluated_at.as_unix_seconds() - cached.live_observed_at.as_unix_seconds();
+    if age_seconds >= MAX_CACHED_MEMBERSHIP_AGE_SECONDS {
+        return Err(AuthorizationError::CachedApprovalExpired {
+            observed_at: cached.live_observed_at,
+            evaluated_at,
+            maximum_age_seconds: MAX_CACHED_MEMBERSHIP_AGE_SECONDS,
+        });
+    }
+
+    Ok(AuthorizedParticipant {
+        actor,
+        approved_forum,
+        authorized_at: evaluated_at,
+        authorization_source: MembershipAuthorizationSource::OutageCache {
+            live_observed_at: cached.live_observed_at,
+            outage: outage.kind,
+        },
+    })
+}
+
+fn validate_identity_binding(
+    approved_forum: ChatId,
+    actor: ParticipantId,
+    evidence_forum: ChatId,
+    evidence_participant: ParticipantId,
+) -> Result<(), AuthorizationError> {
+    if evidence_forum != approved_forum {
+        return Err(AuthorizationError::ForumMismatch {
+            expected: approved_forum,
+            actual: evidence_forum,
+        });
+    }
+    if evidence_participant != actor {
+        return Err(AuthorizationError::ParticipantMismatch {
+            expected: actor,
+            actual: evidence_participant,
+        });
+    }
+    Ok(())
 }

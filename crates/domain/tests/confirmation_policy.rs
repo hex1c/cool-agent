@@ -1,4 +1,8 @@
-use domain::authorization::{LiveMembershipEvidence, MembershipStatus, authorize_participant};
+use domain::authorization::{
+    CachedMembershipApproval, LiveMembershipEvidence, MembershipAuthorizationSource,
+    MembershipLookupOutage, MembershipLookupOutageKind, MembershipStatus, authorize_participant,
+    authorize_participant_from_cache,
+};
 use domain::confirmation::{
     ConfirmationAction, ConfirmationConsumeRequest, ConfirmationError, ConfirmationIssueRequest,
     ConfirmationRecord, ConfirmationStatus, MutationTargetFingerprint, PreviewDigest,
@@ -273,6 +277,37 @@ fn approved_non_owner_consumes_confirmation_and_keeps_the_owner_principal()
     assert_eq!(
         consumed.precondition.confirmation_id,
         ConfirmationId::new("confirmation-1")?
+    );
+    Ok(())
+}
+
+#[test]
+fn outage_cache_can_authorize_confirmation_and_is_recorded()
+-> Result<(), Box<dyn std::error::Error>> {
+    let (workflow, confirmation) = issued_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
+    let actor = participant(202)?;
+    let forum = ChatId::new(-1001);
+    let live = LiveMembershipEvidence::new(forum, actor, MembershipStatus::Approved, time(7));
+    let cached = CachedMembershipApproval::from_live(&live)?;
+    let outage = MembershipLookupOutage::new(
+        forum,
+        actor,
+        MembershipLookupOutageKind::ConnectionFailure,
+        time(8),
+    );
+    let authorized = authorize_participant_from_cache(forum, actor, &cached, &outage, time(8))?;
+
+    let consumed = confirmation.consume(
+        &workflow,
+        &authorized.for_workflow(&workflow),
+        consume_request(8)?,
+    )?;
+    assert_eq!(
+        consumed.confirmation.membership_authorization(),
+        Some(MembershipAuthorizationSource::OutageCache {
+            live_observed_at: time(7),
+            outage: MembershipLookupOutageKind::ConnectionFailure,
+        })
     );
     Ok(())
 }

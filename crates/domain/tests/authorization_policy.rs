@@ -1,5 +1,7 @@
 use domain::authorization::{
-    AuthorizationError, LiveMembershipEvidence, MembershipStatus, authorize_participant,
+    AuthorizationError, CachedMembershipApproval, LiveMembershipEvidence,
+    MembershipAuthorizationSource, MembershipLookupOutage, MembershipLookupOutageKind,
+    MembershipStatus, authorize_participant, authorize_participant_from_cache,
 };
 use domain::identity::{ChatId, ParticipantId, WorkflowId};
 use domain::{Workflow, WorkflowTimestamp};
@@ -122,6 +124,138 @@ fn authorization_requires_membership_evidence_from_the_current_live_check()
     assert!(matches!(
         future,
         Err(AuthorizationError::EvidenceNotCurrent { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn authorization_allows_positive_cache_for_less_than_thirty_minutes_during_outage()
+-> Result<(), Box<dyn std::error::Error>> {
+    let actor = participant(202)?;
+    let forum = ChatId::new(-1001);
+    let observed_at = WorkflowTimestamp::from_unix_seconds(10);
+    let evaluated_at = WorkflowTimestamp::from_unix_seconds(1_809);
+    let live = evidence(-1001, 202, MembershipStatus::Approved, 10)?;
+    let cached = CachedMembershipApproval::from_live(&live)?;
+    let outage = MembershipLookupOutage::new(
+        forum,
+        actor,
+        MembershipLookupOutageKind::Timeout,
+        evaluated_at,
+    );
+
+    let authorized =
+        authorize_participant_from_cache(forum, actor, &cached, &outage, evaluated_at)?;
+    assert_eq!(
+        authorized.authorization_source(),
+        MembershipAuthorizationSource::OutageCache {
+            live_observed_at: observed_at,
+            outage: MembershipLookupOutageKind::Timeout,
+        }
+    );
+    assert_eq!(
+        authorized.for_workflow(&workflow()?).authorization_source(),
+        authorized.authorization_source()
+    );
+    Ok(())
+}
+
+#[test]
+fn authorization_rejects_cache_at_thirty_minutes_or_from_the_future()
+-> Result<(), Box<dyn std::error::Error>> {
+    let actor = participant(202)?;
+    let forum = ChatId::new(-1001);
+    let live = evidence(-1001, 202, MembershipStatus::Approved, 10)?;
+    let cached = CachedMembershipApproval::from_live(&live)?;
+
+    let boundary = WorkflowTimestamp::from_unix_seconds(1_810);
+    let boundary_outage = MembershipLookupOutage::new(
+        forum,
+        actor,
+        MembershipLookupOutageKind::ConnectionFailure,
+        boundary,
+    );
+    assert!(matches!(
+        authorize_participant_from_cache(forum, actor, &cached, &boundary_outage, boundary),
+        Err(AuthorizationError::CachedApprovalExpired { .. })
+    ));
+
+    let future_live = evidence(-1001, 202, MembershipStatus::Approved, 11)?;
+    let future_cache = CachedMembershipApproval::from_live(&future_live)?;
+    let now = WorkflowTimestamp::from_unix_seconds(10);
+    let outage =
+        MembershipLookupOutage::new(forum, actor, MembershipLookupOutageKind::Timeout, now);
+    assert!(matches!(
+        authorize_participant_from_cache(forum, actor, &future_cache, &outage, now),
+        Err(AuthorizationError::CachedApprovalFromFuture { .. })
+    ));
+    Ok(())
+}
+
+#[test]
+fn authorization_rejects_mismatched_cache_or_outage_evidence()
+-> Result<(), Box<dyn std::error::Error>> {
+    let actor = participant(202)?;
+    let forum = ChatId::new(-1001);
+    let now = WorkflowTimestamp::from_unix_seconds(20);
+    let cached = CachedMembershipApproval::from_live(&evidence(
+        -1001,
+        202,
+        MembershipStatus::Approved,
+        10,
+    )?)?;
+
+    let wrong_forum_cache = CachedMembershipApproval::from_live(&evidence(
+        -2002,
+        202,
+        MembershipStatus::Approved,
+        10,
+    )?)?;
+    let valid_outage =
+        MembershipLookupOutage::new(forum, actor, MembershipLookupOutageKind::Timeout, now);
+    assert!(matches!(
+        authorize_participant_from_cache(forum, actor, &wrong_forum_cache, &valid_outage, now,),
+        Err(AuthorizationError::ForumMismatch { .. })
+    ));
+
+    let wrong_actor_cache = CachedMembershipApproval::from_live(&evidence(
+        -1001,
+        303,
+        MembershipStatus::Approved,
+        10,
+    )?)?;
+    assert!(matches!(
+        authorize_participant_from_cache(forum, actor, &wrong_actor_cache, &valid_outage, now,),
+        Err(AuthorizationError::ParticipantMismatch { .. })
+    ));
+
+    for outage in [
+        MembershipLookupOutage::new(
+            ChatId::new(-2002),
+            actor,
+            MembershipLookupOutageKind::Timeout,
+            now,
+        ),
+        MembershipLookupOutage::new(
+            forum,
+            participant(303)?,
+            MembershipLookupOutageKind::Timeout,
+            now,
+        ),
+        MembershipLookupOutage::new(
+            forum,
+            actor,
+            MembershipLookupOutageKind::Timeout,
+            WorkflowTimestamp::from_unix_seconds(19),
+        ),
+    ] {
+        assert!(authorize_participant_from_cache(forum, actor, &cached, &outage, now).is_err());
+    }
+
+    let removed = evidence(-1001, 202, MembershipStatus::NotApproved, 10)?;
+    assert!(matches!(
+        CachedMembershipApproval::from_live(&removed),
+        Err(AuthorizationError::NotApproved)
     ));
     Ok(())
 }

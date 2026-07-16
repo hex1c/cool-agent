@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 
-use crate::authorization::AuthorizedWorkflowAction;
+use crate::authorization::{AuthorizedWorkflowAction, MembershipAuthorizationSource};
 use crate::identity::{ConfirmationId, MessageId, ParticipantId, TopicSessionId, WorkflowId};
 use crate::transition::{
     TransitionError, TransitionOutcome, TransitionRequest, WorkflowTransition,
@@ -139,6 +139,7 @@ pub enum ConfirmationStatus {
 pub struct ConsumedConfirmation {
     pending: PendingConfirmation,
     confirming_actor: ParticipantId,
+    membership_authorization: MembershipAuthorizationSource,
     source: TopicMessageReference,
     confirmed_at: WorkflowTimestamp,
     resulting_workflow_revision: WorkflowRevision,
@@ -170,6 +171,13 @@ impl ConfirmationRecord {
         match self {
             Self::Pending(_) => None,
             Self::Consumed(consumed) => Some(consumed.confirming_actor),
+        }
+    }
+
+    pub const fn membership_authorization(&self) -> Option<MembershipAuthorizationSource> {
+        match self {
+            Self::Pending(_) => None,
+            Self::Consumed(consumed) => Some(consumed.membership_authorization),
         }
     }
 
@@ -274,6 +282,7 @@ impl ConfirmationRecord {
         let confirmation = Self::Consumed(ConsumedConfirmation {
             pending: pending.clone(),
             confirming_actor: authorization.actor(),
+            membership_authorization: authorization.authorization_source(),
             source: request.source,
             confirmed_at: request.confirmed_at,
             resulting_workflow_revision: transition.workflow.revision(),

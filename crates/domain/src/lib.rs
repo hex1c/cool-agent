@@ -13,8 +13,10 @@ pub mod transition;
 pub mod workflow;
 
 pub use authorization::{
-    AuthorizationError, AuthorizedParticipant, AuthorizedWorkflowAction, LiveMembershipEvidence,
-    MembershipStatus, authorize_participant,
+    AuthorizationError, AuthorizedParticipant, AuthorizedWorkflowAction, CachedMembershipApproval,
+    LiveMembershipEvidence, MAX_CACHED_MEMBERSHIP_AGE_SECONDS, MembershipAuthorizationSource,
+    MembershipLookupOutage, MembershipLookupOutageKind, MembershipStatus, authorize_participant,
+    authorize_participant_from_cache,
 };
 pub use confirmation::{
     ConfirmationAction, ConfirmationConsumePrecondition, ConfirmationConsumeRequest,
