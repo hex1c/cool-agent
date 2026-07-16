@@ -17,8 +17,11 @@ pub use authorization::{
     MembershipStatus, authorize_participant,
 };
 pub use confirmation::{
-    ConfirmationAction, ConfirmationIssueOutcome, ConfirmationIssuePrecondition,
-    ConfirmationIssueRequest, MutationTargetFingerprint, PendingConfirmation, PreviewDigest,
+    ConfirmationAction, ConfirmationConsumePrecondition, ConfirmationConsumeRequest,
+    ConfirmationConsumption, ConfirmationError, ConfirmationIssueOutcome,
+    ConfirmationIssuePrecondition, ConfirmationIssueRequest, ConfirmationRecord,
+    ConfirmationStatus, ConsumedConfirmation, MutationTargetFingerprint, PendingConfirmation,
+    PreviewDigest, TopicMessageReference,
 };
 pub use transition::{
     TransitionAudit, TransitionError, TransitionOutcome, TransitionRequest, WorkflowTransition,

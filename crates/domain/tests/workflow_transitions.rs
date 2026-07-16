@@ -1,9 +1,11 @@
+use domain::authorization::{LiveMembershipEvidence, MembershipStatus, authorize_participant};
 use domain::identity::{
     ChatId, ConfirmationId, MessageId, MessageThreadId, ParticipantId, TopicSessionId, WorkflowId,
 };
 use domain::{
-    ConfirmationAction, ConfirmationIssueRequest, MutationTargetFingerprint, PreviewDigest,
-    TransitionAudit, TransitionError, TransitionOutcome, TransitionRequest, WaitDeadline, Workflow,
+    ConfirmationAction, ConfirmationConsumeRequest, ConfirmationIssueRequest, ConfirmationRecord,
+    MutationTargetFingerprint, PreviewDigest, TopicMessageReference, TransitionAudit,
+    TransitionError, TransitionOutcome, TransitionRequest, WaitDeadline, Workflow,
     WorkflowRevision, WorkflowState, WorkflowStateKind, WorkflowTimestamp, WorkflowTransition,
 };
 
@@ -45,24 +47,65 @@ fn advance(
     Ok(apply(workflow, transition, at)?.workflow)
 }
 
+fn topic() -> Result<TopicSessionId, Box<dyn std::error::Error>> {
+    Ok(TopicSessionId::new(
+        ChatId::new(-1001),
+        MessageThreadId::new(77)?,
+    ))
+}
+
 fn request_confirmation(
     workflow: &Workflow,
+    action: ConfirmationAction,
     at: u64,
     expires_at: u64,
+) -> Result<(Workflow, ConfirmationRecord), Box<dyn std::error::Error>> {
+    let issued = workflow.issue_confirmation(ConfirmationIssueRequest {
+        confirmation_id: ConfirmationId::new(format!("confirmation-{at}"))?,
+        expected_workflow_revision: workflow.revision(),
+        topic: topic()?,
+        preview_digest: PreviewDigest::new([1; 32]),
+        mutation_target: MutationTargetFingerprint::new([2; 32]),
+        action,
+        deadline: deadline(expires_at),
+        actor: ParticipantId::new(202)?,
+        source_message: MessageId::new(i64::try_from(at)?)?,
+        timestamp: time(at),
+    })?;
+    Ok((
+        issued.transition.workflow,
+        ConfirmationRecord::from(issued.confirmation),
+    ))
+}
+
+fn consume_confirmation(
+    workflow: &Workflow,
+    confirmation: &ConfirmationRecord,
+    at: u64,
 ) -> Result<Workflow, Box<dyn std::error::Error>> {
-    Ok(workflow
-        .issue_confirmation(ConfirmationIssueRequest {
-            confirmation_id: ConfirmationId::new(format!("confirmation-{at}"))?,
-            expected_workflow_revision: workflow.revision(),
-            topic: TopicSessionId::new(ChatId::new(-1001), MessageThreadId::new(77)?),
-            preview_digest: PreviewDigest::new([1; 32]),
-            mutation_target: MutationTargetFingerprint::new([2; 32]),
-            action: ConfirmationAction::StartSheetOrDocWrite,
-            deadline: deadline(expires_at),
-            actor: ParticipantId::new(202)?,
-            source_message: MessageId::new(i64::try_from(at)?)?,
-            timestamp: time(at),
-        })?
+    let actor = ParticipantId::new(202)?;
+    let authorized = authorize_participant(
+        ChatId::new(-1001),
+        actor,
+        &LiveMembershipEvidence::new(
+            ChatId::new(-1001),
+            actor,
+            MembershipStatus::Approved,
+            time(at),
+        ),
+        time(at),
+    )?;
+    Ok(confirmation
+        .consume(
+            workflow,
+            &authorized.for_workflow(workflow),
+            ConfirmationConsumeRequest {
+                preview_digest: PreviewDigest::new([1; 32]),
+                mutation_target: MutationTargetFingerprint::new([2; 32]),
+                source: TopicMessageReference::new(topic()?, MessageId::new(i64::try_from(at)?)?),
+                confirmed_at: time(at),
+            },
+        )?
         .transition
         .workflow)
 }
@@ -86,9 +129,11 @@ fn drafting_completed() -> Result<Workflow, Box<dyn std::error::Error>> {
     )
 }
 
-fn waiting_for_confirmation() -> Result<Workflow, Box<dyn std::error::Error>> {
+fn waiting_for_confirmation(
+    action: ConfirmationAction,
+) -> Result<(Workflow, ConfirmationRecord), Box<dyn std::error::Error>> {
     let workflow = drafting_completed()?;
-    request_confirmation(&workflow, 7, 100)
+    request_confirmation(&workflow, action, 7, 100)
 }
 
 #[test]
@@ -136,12 +181,13 @@ fn workflow_state_quotation_branch_reports_every_stage_and_audit_metadata()
         workflow.state(),
         &WorkflowState::CalculationOrDraftingCompleted
     );
-    let workflow = request_confirmation(&workflow, 7, 100)?;
+    let (workflow, confirmation) =
+        request_confirmation(&workflow, ConfirmationAction::StartSheetOrDocWrite, 7, 100)?;
     assert!(matches!(
         workflow.state(),
         WorkflowState::WaitingForConfirmation { .. }
     ));
-    let workflow = advance(&workflow, WorkflowTransition::StartSheetOrDocWrite, 8)?;
+    let workflow = consume_confirmation(&workflow, &confirmation, 8)?;
     assert_eq!(workflow.state(), &WorkflowState::SheetOrDocWriteStarted);
     let workflow = advance(&workflow, WorkflowTransition::CompleteSheetOrDocWrite, 9)?;
     assert_eq!(workflow.state(), &WorkflowState::SheetOrDocWriteCompleted);
@@ -160,8 +206,9 @@ fn workflow_state_quotation_branch_reports_every_stage_and_audit_metadata()
 #[test]
 fn workflow_state_calendar_email_and_direct_pdf_branches_are_explicit()
 -> Result<(), Box<dyn std::error::Error>> {
-    let calendar = waiting_for_confirmation()?;
-    let calendar = advance(&calendar, WorkflowTransition::StartCalendarOrEmailAction, 8)?;
+    let (calendar, confirmation) =
+        waiting_for_confirmation(ConfirmationAction::StartCalendarOrEmailAction)?;
+    let calendar = consume_confirmation(&calendar, &confirmation, 8)?;
     assert_eq!(
         calendar.state(),
         &WorkflowState::CalendarOrEmailActionStarted
@@ -179,15 +226,16 @@ fn workflow_state_calendar_email_and_direct_pdf_branches_are_explicit()
     let calendar = advance(&calendar, WorkflowTransition::CompleteWorkflow, 11)?;
     assert_eq!(calendar.state(), &WorkflowState::Completed);
 
-    let sheet = waiting_for_confirmation()?;
-    let sheet = advance(&sheet, WorkflowTransition::StartSheetOrDocWrite, 8)?;
+    let (sheet, confirmation) = waiting_for_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
+    let sheet = consume_confirmation(&sheet, &confirmation, 8)?;
     let sheet = advance(&sheet, WorkflowTransition::CompleteSheetOrDocWrite, 9)?;
     let sheet = advance(&sheet, WorkflowTransition::CompleteArtifactDelivery, 10)?;
     let sheet = advance(&sheet, WorkflowTransition::CompleteWorkflow, 11)?;
     assert_eq!(sheet.state(), &WorkflowState::Completed);
 
-    let pdf = waiting_for_confirmation()?;
-    let pdf = advance(&pdf, WorkflowTransition::StartPdfGeneration, 8)?;
+    let (pdf, confirmation) =
+        waiting_for_confirmation(ConfirmationAction::StartDirectPdfGeneration)?;
+    let pdf = consume_confirmation(&pdf, &confirmation, 8)?;
     let pdf = advance(&pdf, WorkflowTransition::CompletePdfGeneration, 9)?;
     let pdf = advance(&pdf, WorkflowTransition::CompleteArtifactDelivery, 10)?;
     let pdf = advance(&pdf, WorkflowTransition::CompleteWorkflow, 11)?;
@@ -271,7 +319,8 @@ fn workflow_state_clarification_and_correction_loops_resume_the_right_stage()
         WorkflowTransition::CompleteCalculationOrDrafting,
         21,
     )?;
-    let confirmation = request_confirmation(&drafted, 22, 30)?;
+    let (confirmation, _) =
+        request_confirmation(&drafted, ConfirmationAction::StartSheetOrDocWrite, 22, 30)?;
     let corrected = advance(&confirmation, WorkflowTransition::ApplyCorrection, 23)?;
     assert_eq!(
         corrected.state(),
@@ -283,7 +332,7 @@ fn workflow_state_clarification_and_correction_loops_resume_the_right_stage()
 #[test]
 fn workflow_state_waits_expire_and_reject_late_or_premature_actions()
 -> Result<(), Box<dyn std::error::Error>> {
-    let waiting = waiting_for_confirmation()?;
+    let (waiting, _) = waiting_for_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
     let late = waiting.transition(TransitionRequest {
         transition: WorkflowTransition::ApplyCorrection,
         expected_revision: waiting.revision(),
@@ -377,21 +426,18 @@ fn workflow_state_terminal_states_are_immutable() -> Result<(), Box<dyn std::err
     assert_eq!(failed.state(), &WorkflowState::Failed);
     assert_eq!(stopped.state(), &WorkflowState::Stopped);
 
-    let waiting = waiting_for_confirmation()?;
+    let (waiting, _) = waiting_for_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
     let expired = advance(&waiting, WorkflowTransition::ExpireWorkflow, 100)?;
-    let completed = advance(
-        &advance(
-            &advance(
-                &advance(&waiting, WorkflowTransition::StartCalendarOrEmailAction, 8)?,
-                WorkflowTransition::CompleteCalendarOrEmailAction,
-                9,
-            )?,
-            WorkflowTransition::CompleteArtifactDelivery,
-            10,
-        )?,
-        WorkflowTransition::CompleteWorkflow,
-        11,
+    let (calendar, confirmation) =
+        waiting_for_confirmation(ConfirmationAction::StartCalendarOrEmailAction)?;
+    let calendar = consume_confirmation(&calendar, &confirmation, 8)?;
+    let calendar = advance(
+        &calendar,
+        WorkflowTransition::CompleteCalendarOrEmailAction,
+        9,
     )?;
+    let calendar = advance(&calendar, WorkflowTransition::CompleteArtifactDelivery, 10)?;
+    let completed = advance(&calendar, WorkflowTransition::CompleteWorkflow, 11)?;
     assert_eq!(expired.state(), &WorkflowState::Expired);
     assert_eq!(completed.state(), &WorkflowState::Completed);
 

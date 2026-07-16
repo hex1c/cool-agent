@@ -252,7 +252,14 @@ impl Workflow {
         if matches!(
             request.transition,
             WorkflowTransition::RequestConfirmation { .. }
-        ) {
+        ) || matches!(self.state(), WorkflowState::WaitingForConfirmation { .. })
+            && matches!(
+                request.transition,
+                WorkflowTransition::StartSheetOrDocWrite
+                    | WorkflowTransition::StartPdfGeneration
+                    | WorkflowTransition::StartCalendarOrEmailAction
+            )
+        {
             return Err(TransitionError::ConfirmationBoundaryRequired {
                 transition: request.transition.kind(),
             });
