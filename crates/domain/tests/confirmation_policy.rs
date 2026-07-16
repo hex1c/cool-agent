@@ -54,6 +54,7 @@ fn advance(
 fn drafting_completed() -> Result<Workflow, Box<dyn std::error::Error>> {
     let workflow = Workflow::new(
         WorkflowId::new("workflow-confirmation")?,
+        topic()?,
         participant(101)?,
         time(1),
     );
@@ -152,6 +153,13 @@ fn confirmation_issuance_rejects_direct_or_invalid_entry() -> Result<(), Box<dyn
         Err(TransitionError::ConfirmationBoundaryRequired { .. })
     ));
 
+    let mut wrong_topic = issue_request(&workflow)?;
+    wrong_topic.topic = TopicSessionId::new(ChatId::new(-1001), MessageThreadId::new(88)?);
+    assert!(matches!(
+        workflow.issue_confirmation(wrong_topic),
+        Err(TransitionError::TopicMismatch { .. })
+    ));
+
     let mut stale = issue_request(&workflow)?;
     stale.expected_workflow_revision = WorkflowRevision::INITIAL;
     assert!(matches!(
@@ -159,7 +167,12 @@ fn confirmation_issuance_rejects_direct_or_invalid_entry() -> Result<(), Box<dyn
         Err(TransitionError::RevisionConflict { .. })
     ));
 
-    let initial = Workflow::new(WorkflowId::new("wrong-state")?, participant(101)?, time(1));
+    let initial = Workflow::new(
+        WorkflowId::new("wrong-state")?,
+        topic()?,
+        participant(101)?,
+        time(1),
+    );
     let wrong_state = ConfirmationIssueRequest {
         expected_workflow_revision: initial.revision(),
         ..issue_request(&workflow)?
@@ -434,6 +447,7 @@ fn stopped_corrected_and_mismatched_workflows_invalidate_confirmation()
 
     let other_id = Workflow::new(
         WorkflowId::new("other-workflow")?,
+        topic()?,
         participant(101)?,
         time(1),
     );
@@ -444,6 +458,7 @@ fn stopped_corrected_and_mismatched_workflows_invalidate_confirmation()
 
     let other_owner = Workflow::new(
         WorkflowId::new("workflow-confirmation")?,
+        topic()?,
         participant(303)?,
         time(1),
     );

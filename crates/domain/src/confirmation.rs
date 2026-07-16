@@ -412,6 +412,12 @@ impl Workflow {
         &self,
         request: ConfirmationIssueRequest,
     ) -> Result<ConfirmationIssueOutcome, TransitionError> {
+        if request.topic != self.topic() {
+            return Err(TransitionError::TopicMismatch {
+                expected: self.topic(),
+                actual: request.topic,
+            });
+        }
         let old_revision = request.expected_workflow_revision;
         let confirmation_id = request.confirmation_id;
         let topic = request.topic;

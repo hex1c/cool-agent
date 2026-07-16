@@ -3,7 +3,7 @@ use domain::authorization::{
     MembershipAuthorizationSource, MembershipLookupOutage, MembershipLookupOutageKind,
     MembershipStatus, authorize_participant, authorize_participant_from_cache,
 };
-use domain::identity::{ChatId, ParticipantId, WorkflowId};
+use domain::identity::{ChatId, MessageThreadId, ParticipantId, TopicSessionId, WorkflowId};
 use domain::{Workflow, WorkflowTimestamp};
 
 fn participant(value: i64) -> Result<ParticipantId, Box<dyn std::error::Error>> {
@@ -13,6 +13,7 @@ fn participant(value: i64) -> Result<ParticipantId, Box<dyn std::error::Error>> 
 fn workflow() -> Result<Workflow, Box<dyn std::error::Error>> {
     Ok(Workflow::new(
         WorkflowId::new("workflow-16")?,
+        TopicSessionId::new(ChatId::new(-1001), MessageThreadId::new(77)?),
         participant(101)?,
         WorkflowTimestamp::from_unix_seconds(1),
     ))

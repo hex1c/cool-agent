@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
 
-use crate::identity::{MessageId, ParticipantId};
+use crate::identity::{MessageId, ParticipantId, TopicSessionId};
 use crate::workflow::{
     ClarificationResume, WaitDeadline, Workflow, WorkflowRevision, WorkflowState,
     WorkflowStateKind, WorkflowTimestamp,
@@ -175,6 +175,10 @@ pub enum TransitionError {
     ConfirmationBoundaryRequired {
         transition: WorkflowTransitionKind,
     },
+    TopicMismatch {
+        expected: TopicSessionId,
+        actual: TopicSessionId,
+    },
     RevisionExhausted,
 }
 
@@ -235,6 +239,10 @@ impl Display for TransitionError {
             Self::ConfirmationBoundaryRequired { transition } => write!(
                 formatter,
                 "transition {transition:?} requires the confirmation boundary"
+            ),
+            Self::TopicMismatch { expected, actual } => write!(
+                formatter,
+                "workflow topic {actual:?} does not match expected topic {expected:?}"
             ),
             Self::RevisionExhausted => formatter.write_str("workflow revision exhausted"),
         }

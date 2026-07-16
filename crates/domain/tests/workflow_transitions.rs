@@ -20,6 +20,7 @@ fn deadline(seconds: u64) -> WaitDeadline {
 fn workflow() -> Result<Workflow, Box<dyn std::error::Error>> {
     Ok(Workflow::new(
         WorkflowId::new("workflow-15")?,
+        topic()?,
         ParticipantId::new(101)?,
         time(1),
     ))
@@ -481,6 +482,7 @@ fn workflow_state_revision_exhaustion_is_typed() -> Result<(), Box<dyn std::erro
     let serialized = format!(
         r#"{{
             "id": "workflow-15",
+            "topic": {{"chat_id": -1001, "message_thread_id": 77}},
             "owner": 101,
             "state": {{"stage": "request_accepted"}},
             "revision": {},
