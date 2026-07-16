@@ -41,13 +41,13 @@ binding and replay rules for confirmations and callbacks.
 
 **Acceptance criteria:**
 
-- [ ] The decision defines topic reuse, terminal-topic behavior, and late-message handling.
+- [x] The decision defines topic reuse, terminal-topic behavior, and late-message handling.
 - [x] Confirmation binds workflow revision, preview digest, target, owner, actor, and expiry.
 - [x] Live membership checks and outage behavior are explicitly decided.
 
 **Verification:**
 
-- [ ] Human approves the ADR and corresponding PRD clarification if needed.
+- [x] Human approves the ADR and corresponding PRD clarification if needed.
 
 **Dependencies:** Task 1
 
