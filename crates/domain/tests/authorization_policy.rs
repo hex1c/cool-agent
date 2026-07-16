@@ -43,9 +43,17 @@ fn authorization_allows_an_approved_non_owner_but_keeps_google_bound_to_the_owne
     )?;
 
     let workflow_action = authorized.for_workflow(&workflow()?);
+    assert_eq!(
+        authorized.authorized_at(),
+        WorkflowTimestamp::from_unix_seconds(10)
+    );
     assert_eq!(workflow_action.actor(), actor);
     assert_eq!(workflow_action.google_principal(), participant(101)?);
     assert_eq!(workflow_action.approved_forum(), forum);
+    assert_eq!(
+        workflow_action.authorized_at(),
+        WorkflowTimestamp::from_unix_seconds(10)
+    );
     Ok(())
 }
 

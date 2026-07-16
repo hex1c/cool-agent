@@ -43,6 +43,7 @@ impl LiveMembershipEvidence {
 pub struct AuthorizedParticipant {
     actor: ParticipantId,
     approved_forum: ChatId,
+    authorized_at: WorkflowTimestamp,
 }
 
 impl AuthorizedParticipant {
@@ -53,6 +54,7 @@ impl AuthorizedParticipant {
             actor: self.actor,
             google_principal: workflow.owner(),
             approved_forum: self.approved_forum,
+            authorized_at: self.authorized_at,
         }
     }
 
@@ -63,6 +65,10 @@ impl AuthorizedParticipant {
     pub const fn approved_forum(&self) -> ChatId {
         self.approved_forum
     }
+
+    pub const fn authorized_at(&self) -> WorkflowTimestamp {
+        self.authorized_at
+    }
 }
 
 /// Authorized workflow action with Google access fixed to the workflow owner.
@@ -71,6 +77,7 @@ pub struct AuthorizedWorkflowAction {
     actor: ParticipantId,
     google_principal: ParticipantId,
     approved_forum: ChatId,
+    authorized_at: WorkflowTimestamp,
 }
 
 impl AuthorizedWorkflowAction {
@@ -84,6 +91,10 @@ impl AuthorizedWorkflowAction {
 
     pub const fn approved_forum(&self) -> ChatId {
         self.approved_forum
+    }
+
+    pub const fn authorized_at(&self) -> WorkflowTimestamp {
+        self.authorized_at
     }
 }
 
@@ -163,5 +174,6 @@ pub fn authorize_participant(
     Ok(AuthorizedParticipant {
         actor,
         approved_forum,
+        authorized_at: evaluated_at,
     })
 }
