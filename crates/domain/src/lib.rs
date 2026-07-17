@@ -6,8 +6,10 @@ pub mod attachment;
 pub mod authorization;
 pub mod confirmation;
 pub mod contracts;
+pub mod idempotency;
 pub mod identity;
 pub mod money;
+pub mod retry;
 pub mod routing;
 pub mod transition;
 pub mod workflow;
@@ -25,6 +27,11 @@ pub use confirmation::{
     ConfirmationError, ConfirmationIssueOutcome, ConfirmationIssuePrecondition,
     ConfirmationIssueRequest, ConfirmationRecord, ConfirmationStatus, ConsumedConfirmation,
     MutationTargetFingerprint, PendingConfirmation, PreviewDigest, TopicMessageReference,
+};
+pub use idempotency::{IdempotencyKey, OperationKind, OperationTargetFingerprint};
+pub use retry::{
+    AttemptNumber, JitterSample, MAX_EXTERNAL_OPERATION_ATTEMPTS, RetryDecision, RetryPolicy,
+    RetryPolicyError,
 };
 pub use transition::{
     TransitionAudit, TransitionError, TransitionOutcome, TransitionRequest, WorkflowTransition,
