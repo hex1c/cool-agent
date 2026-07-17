@@ -2,7 +2,7 @@
 
 # ADR 0002: Isolated Per-Environment Budget Control
 
-- **Status:** Proposed; project-owner budget-model approval recorded, remaining conditions pending
+- **Status:** Accepted; platform and security implementation reviews pending
 - **Date:** 2026-07-14
 - **Last reviewed:** 2026-07-17
 - **Decision owners:** Project owner; platform and security reviews pending
@@ -74,8 +74,8 @@ Each environment's monthly configuration records:
 - Approved USD-to-INR conversion basis.
 - Foreign-exchange buffer.
 - Operational safety margin.
-- A proposed ₹10 monthly operational reserve inside that environment's ₹300
-  cap, subject to human approval.
+- An approved ₹10 monthly operational reserve inside that environment's ₹300
+  cap.
 - ₹240 warning threshold for that environment.
 - ₹270 new-intake suspension threshold for that environment.
 - ₹300 hard cap for that environment.
@@ -153,7 +153,7 @@ All thresholds below apply independently to the calling environment:
   or a new atomic reservation keeps that environment's projected invoice below
   ₹300 including safety margin.
 - **At the projected hard cap:** reject new cost-bearing work in that
-  environment. The proposed ₹10 operational reserve is deducted from that
+  environment. The approved ₹10 operational reserve is deducted from that
   environment's spendable workflow budget, replenishes only at an approved
   invoice-month rollover, cannot be borrowed by workflow operations, and is
   consumed by metered status, cancellation, failure reporting, and authorized
@@ -166,9 +166,9 @@ Threshold comparison is inclusive at warning and suspension boundaries. The hard
 cap is exclusive: a decision requiring one environment's projected spend to
 equal ₹300 is denied.
 
-The ₹10 reserve is proposed per environment; it is not evidence that the allowed
-paths fit within ₹10. Task 8 must measure their worst-case monthly calls and
-replace or approve the amount. Exhausting an environment's reserve disables its
+The ₹10 reserve is approved per environment, but approval is not evidence that
+all allowed paths fit within ₹10. Task 8 must still measure their worst-case
+monthly calls and propose a change if the reserve is insufficient. Exhausting an environment's reserve disables its
 retrieval but retains a no-new-work fail-closed decision. It must not borrow from
 another environment or a future month.
 
@@ -328,13 +328,13 @@ Secrets Manager storage charge without expanding credential blast radius.
 
 - [x] Human approves separate ₹300 monthly caps for development, staging, and
   production, with an aggregate account ceiling of ₹900 before GST.
-- [ ] Human approves integer micro-INR, GST, FX, and safety-margin semantics.
-- [ ] Human approves the proposed ₹10 operational reserve per environment.
-- [ ] Human approves inclusive warning/suspension and exclusive hard-cap rules
+- [x] Human approves integer micro-INR, GST, FX, and safety-margin semantics.
+- [x] Human approves the ₹10 operational reserve per environment.
+- [x] Human approves inclusive warning/suspension and exclusive hard-cap rules
   as per-environment decisions.
 - [x] Human agrees no environment may override the fail-closed outage policy
   through local configuration.
-- [ ] Human approves the proposed bounded outage paths and their reserve usage.
+- [x] Human approves the bounded outage paths and their reserve usage.
 - [x] Human requires generated IAM policies to receive human review before
   deployment.
 - [x] Human approves denial on a failed or timed-out deployment gate.

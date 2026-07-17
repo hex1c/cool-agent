@@ -52,6 +52,22 @@ fn config_loader_rejects_invalid_budget_values() {
 }
 
 #[test]
+fn config_loader_rejects_reserve_that_consumes_the_suspension_headroom() {
+    let error = application::config_loader::load_config(
+        fixture("invalid-reserve.yaml"),
+        fixture("development.yaml"),
+        repository_file("config/schema/company.schema.json"),
+        Environment::Development,
+    )
+    .expect_err("operational reserve must remain above the suspension threshold");
+
+    assert!(matches!(
+        error,
+        ConfigError::SchemaViolation { .. } | ConfigError::InvalidValue { .. }
+    ));
+}
+
+#[test]
 fn config_loader_rejects_cross_environment_overrides() {
     let error = application::config_loader::load_config(
         fixture("company.yaml"),

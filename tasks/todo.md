@@ -512,14 +512,14 @@ deployment decisions from current and projected usage.
 
 **Acceptance criteria:**
 
-- [ ] Configured 80%, 90%, and ₹300 boundaries behave exactly as the PRD specifies.
-- [ ] Already-confirmed work proceeds only while projected cost remains below the cap.
-- [ ] Status and permitted retrieval remain available during intake suspension.
+- [x] Configured 80%, 90%, and ₹300 boundaries behave exactly as the PRD specifies.
+- [x] Already-confirmed work proceeds only while projected cost remains below the cap.
+- [x] Status and permitted retrieval remain available during intake suspension.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p domain cost_guard`
-- [ ] Coverage check: cost-stop policy reaches 100% branch coverage.
+- [x] Tests pass: `cargo test -p domain --test cost_policy`
+- [x] Coverage check: cost-stop policy reaches 100% branch coverage.
 
 **Dependencies:** Tasks 8, 14
 
