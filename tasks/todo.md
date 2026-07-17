@@ -483,14 +483,14 @@ and manual-review handling before any external write adapter exists.
 
 **Acceptance criteria:**
 
-- [ ] Stable inputs produce stable keys, distinct targets produce distinct keys, and no operation exceeds three attempts.
-- [ ] Ambiguous acceptance cannot be retried automatically.
-- [ ] A reusable executor persists attempts, applies exponential backoff with jitter, and emits terminal failure after exhaustion.
+- [x] Stable inputs produce stable keys, distinct targets produce distinct keys, and no operation exceeds three attempts.
+- [x] Ambiguous acceptance cannot be retried automatically.
+- [x] A reusable executor persists attempts, applies exponential backoff with jitter, and emits terminal failure after exhaustion.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p domain idempotency retry`
-- [ ] Tests pass: `cargo test -p application external_operation`
+- [x] Tests pass: `cargo test -p domain --test idempotency_policy`
+- [x] Tests pass: `cargo test -p application --test external_operation`
 
 **Dependencies:** Task 14
 
