@@ -254,7 +254,8 @@ Sanitization must:
 
 Record the number of OAuth client secrets and refresh-token records required in
 each environment and price them in `docs/cost/aws-monthly-forecast.csv`.
-The current Secrets Manager interpretation is already above the shared budget.
+The current Secrets Manager interpretation is already above each environment's
+₹300 budget when credentials remain properly isolated.
 Task 6 cannot approve a storage mechanism that Task 8 deems unaffordable.
 
 ## Approval

@@ -65,9 +65,10 @@ paths, rollback consideration, and human approval before deploy.
   during implementation. Mocks may unblock early work, but real-provider tests
   and deployments remain gated on the applicable credentials or assets.
 - Keep application usage counters authoritative for budget enforcement because
-  AWS Budgets data can lag. An approved Phase 0 ADR defines the shared,
-  cross-environment aggregation/control resource, consistency, least-privilege
-  access, and fail-closed behavior while all other resources remain isolated.
+  AWS Budgets data can lag. An approved Phase 0 ADR defines isolated
+  per-environment budget guards, consistency, least-privilege access, shared-cost
+  attribution, and fail-closed behavior. Each environment has an independent
+  ₹300 monthly cap.
 - Use real-provider feasibility checks early, local emulators for fast feedback,
   and staging for IAM, networking, quota, and provider-parity proof.
 
@@ -116,7 +117,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 - [ ] Task 5: Benchmark basic-reasoning AI models and Pi compatibility
 - [ ] Task 6: Validate Google OAuth lifecycle
 - [ ] Task 7: Validate Hostinger SMTP ambiguity behavior
-- [ ] Task 8: Forecast AWS costs and decide shared budget control
+- [ ] Task 8: Forecast AWS costs and decide per-environment budget control
 
 ### Checkpoint: Feasibility Approved
 
@@ -259,7 +260,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 | Office documents exhaust Lambda resources or contain active content | High | MIME sniffing, macro rejection, decompression/page/row limits, and per-format fixtures |
 | Google/SMTP operations duplicate after ambiguous timeouts | High | Reserve idempotency records before mutation; ambiguous acceptance enters manual review |
 | Pi/model output is invalid or financially inaccurate | High | Early fixture benchmark, strict schema validation, human confirmation, no mutation on invalid output |
-| Shared cross-environment budget control is inconsistent or over-privileged | High | Phase 0 ADR, one authoritative aggregate, conditional updates, fail-closed intake guard, and deploy gate |
+| Per-environment budget control misses or misattributes account-level charges | High | Phase 0 ADR, isolated authoritative aggregates, conservative shared-cost allocation, conditional updates, fail-closed intake guards, and deploy gates |
 | DynamoDB conversation history exceeds item limits | Medium | Store ordered metadata/pointers in DynamoDB and large sanitized payloads in S3 |
 | Local emulators differ from AWS | Medium | Treat sandbox as fast feedback and repeat IAM/network/quota checks in staging |
 | Credentials or company assets arrive later in development | Medium | Use mocks early, request each dependency before its provider test, and retain explicit staging/production gates |

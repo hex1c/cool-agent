@@ -5,7 +5,7 @@
 **Audience:** Internal company implementation  
 **Initial users:** Approximately three employees  
 **Expected usage:** Approximately ten workflows per week  
-**Monthly AWS budget:** ₹300 across all environments
+**Monthly AWS budget:** ₹300 per environment; ₹900 aggregate account ceiling
 
 ## 1. Objective
 
@@ -44,7 +44,7 @@ services after an approved group participant reviews and confirms the action.
   Calendar.
 - Keep OAuth links, authorization codes, access tokens, refresh tokens, and
   related OAuth details out of the group conversation.
-- Keep total AWS expenditure within ₹300 per month.
+- Keep each environment's AWS expenditure within ₹300 per month.
 
 ## 2. Assumptions and Product Decisions
 
@@ -76,8 +76,8 @@ services after an approved group participant reviews and confirms the action.
     participant are the financial correctness safeguard.
 14. Raw inputs and generated artifacts are retained indefinitely unless the
     company later changes its retention policy.
-15. New workflow intake is suspended before projected AWS expenditure would
-    exceed ₹300 for the month.
+15. New workflow intake is suspended in an environment before its projected
+    AWS expenditure would reach ₹300 for the month.
 16. Secrets use separate AWS Systems Manager Parameter Store standard-tier
     `SecureString` values encrypted with the AWS managed Systems Manager KMS key.
     Credentials remain isolated by environment and capability; application-only
@@ -85,7 +85,8 @@ services after an approved group participant reviews and confirms the action.
 17. Standard Telegram cloud encryption is accepted. Bot chats are not treated
     as end-to-end encrypted. AWS copies remain encrypted in transit and at rest.
 18. Development, staging, and production use isolated stacks in the same AWS
-    account and share the combined ₹300 monthly AWS budget.
+    account, each with an independent ₹300 monthly AWS budget. The aggregate
+    account ceiling is ₹900 before GST.
 19. Each forum topic hosts one workflow identity. After a terminal outcome, the
     topic remains available for read-only questions about retained session
     history, but the workflow is not reopened and new or changed work requires a
@@ -505,15 +506,18 @@ change company configuration.
 
 ## 10. Cost Controls
 
-The total AWS budget is ₹300 per month across development, staging, and
-production unless a later approved specification changes the scope.
+Development, staging, and production each have an independent ₹300 monthly AWS
+service-cost budget. If all three environments fully use their allocations, the
+aggregate account ceiling is ₹900 before GST.
 
 Default controls are:
 
-- Warn administrators and active users at 80% of the monthly budget (₹240).
-- Suspend new workflow intake at 90% of the monthly budget (₹270).
-- Allow already-confirmed operations to finish only when the projected total
-  remains below ₹300.
+- Warn administrators and active users when an environment reaches 80% of its
+  monthly budget (₹240).
+- Suspend new workflow intake when that environment reaches 90% of its monthly
+  budget (₹270).
+- Allow already-confirmed operations to finish only when that environment's
+  projected total remains below ₹300.
 - Continue serving non-mutating status and artifact retrieval where doing so
   does not risk the cap.
 - Retain existing data indefinitely even while new intake is suspended.
@@ -527,8 +531,8 @@ AWS Budgets reporting can be delayed. Application usage counters and a safety
 margin are therefore required. The system must not claim that AWS Budgets alone
 can enforce the cap.
 
-A deployment is blocked when forecast fixed costs or configured resource use
-leave insufficient safety margin below ₹300.
+An environment deployment is blocked when its forecast fixed costs or configured
+resource use leave insufficient safety margin below that environment's ₹300 cap.
 
 ## 11. Project Structure
 
@@ -782,8 +786,9 @@ The specification is implemented successfully when:
 17. Duplicate webhooks and retries do not duplicate confirmed writes.
 18. Raw inputs and generated artifacts remain available indefinitely while
     access remains authorized.
-19. The system warns at the configured budget threshold and suspends intake
-    before projected monthly AWS cost exceeds ₹300.
+19. The system warns at each environment's configured budget threshold and
+    suspends that environment's intake before projected monthly AWS cost reaches
+    ₹300.
 20. Development, staging, and production pass their required automated and
     end-to-end verification gates.
 21. A confirmed quotation matching the layout of
@@ -811,7 +816,8 @@ The specification is implemented successfully when:
    OAuth app identifiers, Hostinger sender address, and Drive folder IDs will
    be created or supplied during development before their integration tests.
 4. Development, staging, and production will use isolated stacks in the same
-   AWS account while sharing the combined ₹300 monthly AWS budget.
+   AWS account with independent ₹300 monthly AWS budgets and an aggregate account
+   ceiling of ₹900 before GST.
 
 ## 18. Authoritative References
 

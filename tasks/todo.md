@@ -191,21 +191,22 @@ out, and connection-dropped sends so retries cannot duplicate email.
 
 **Estimated scope:** Small: 2 files
 
-## Task 8: Forecast AWS costs and decide shared budget control
+## Task 8: Forecast AWS costs and decide per-environment budget control
 
 **Description:** Calculate fixed and usage-based monthly costs for isolated dev,
-staging, and production stacks under the shared ₹300 cap.
+staging, and production stacks under independent ₹300 caps and a ₹900 aggregate
+account ceiling.
 
 **Acceptance criteria:**
 
 - [x] The worksheet includes Step Functions, Lambda, API Gateway, DynamoDB, S3, Parameter Store/KMS, logs, alarms, retention growth, and safety margin.
-- [ ] An approved ADR defines shared cross-environment usage aggregation, ownership, consistency, fail-closed behavior, and least-privilege access.
+- [ ] An approved ADR defines isolated per-environment usage aggregation, shared-cost attribution, ownership, consistency, fail-closed behavior, and least-privilege access.
 - [ ] Warning, suspension, and deployment-block thresholds remain feasible; an unaffordable design produces a PRD change proposal.
 
 **Verification:**
 
 - [ ] Manual check: recalculate with PRD expected usage and worst-case attachment limits.
-- [ ] Human approves the forecast and shared-budget ADR.
+- [ ] Human approves the per-environment forecasts and budget-control ADR.
 
 **Dependencies:** None
 
@@ -1208,13 +1209,13 @@ DynamoDB, S3, Parameter Store/KMS, and Step Functions resources.
 ## Task 39A: Add IAM and isolated environment controls
 
 **Description:** Apply least-privilege IAM, encryption, retention, logging, and
-cross-environment controls to the core SAM resources.
+strict environment-isolation controls to the core SAM resources.
 
 **Acceptance criteria:**
 
 - [ ] Dev, staging, and production resource names and mutable data cannot cross-reference each other.
 - [ ] Functions access only their required tables, prefixes, secrets, and state-machine actions.
-- [ ] The shared budget-control resource follows the approved consistency and fail-closed ADR.
+- [ ] Each isolated budget-control resource follows the approved consistency, attribution, and fail-closed ADR.
 
 **Verification:**
 
