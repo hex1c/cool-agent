@@ -537,14 +537,14 @@ topic, revision, history, audit, idempotency, and cost semantics are stable.
 
 **Acceptance criteria:**
 
-- [ ] Ports cover workflows, confirmations, idempotency, history, OAuth state, usage, objects, and secrets.
-- [ ] Key design supports conditional writes, TTL, pagination, and three environments without cross-talk.
-- [ ] Large conversation content is stored by S3 pointer rather than in one DynamoDB item.
+- [x] Ports cover workflows, confirmations, idempotency, history, OAuth state, usage, objects, and secrets.
+- [x] Key design supports conditional writes, TTL, pagination, and three environments without cross-talk.
+- [x] Large conversation content is stored by S3 pointer rather than in one DynamoDB item.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p application repository_contracts`
-- [ ] Human approves `docs/architecture/dynamodb-keys.md`.
+- [x] Tests pass: `cargo test -p application --test repository_contracts`
+- [x] Human approves `docs/architecture/dynamodb-keys.md`.
 
 **Dependencies:** Tasks 8, 15-18
 

@@ -147,7 +147,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 - [x] Task 16: Implement live membership authorization and revision-bound confirmation
 - [x] Task 17: Implement idempotency and retry policy
 - [x] Task 18: Implement the budget decision policy
-- [ ] Task 19: Define persistence ports and DynamoDB keys
+- [x] Task 19: Define persistence ports and DynamoDB keys
 - [ ] Task 20: Implement conditional workflow and idempotency storage
 - [ ] Task 21: Implement object, history, and secret storage
 
