@@ -564,14 +564,14 @@ idempotency repositories with optimistic concurrency and atomic reservations.
 
 **Acceptance criteria:**
 
-- [ ] Concurrent transition attempts yield exactly one accepted write.
-- [ ] External actions require an idempotency reservation before invocation.
-- [ ] Audit entries retain owner, actor, source message, revision, and resource IDs.
+- [x] Concurrent transition attempts yield exactly one accepted write.
+- [x] External actions require an idempotency reservation before invocation.
+- [x] Audit entries retain owner, actor, source message, revision, and resource IDs.
 
 **Verification:**
 
-- [ ] Tests pass against DynamoDB Local: `cargo test -p storage dynamodb --features integration`
-- [ ] Fault check: concurrent confirmation test accepts one mutation reservation.
+- [x] Tests pass against DynamoDB Local: `cargo test -p storage dynamodb --features integration`
+- [x] Fault check: concurrent confirmation test accepts one mutation reservation.
 
 **Dependencies:** Task 19
 

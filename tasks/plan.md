@@ -148,7 +148,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 - [x] Task 17: Implement idempotency and retry policy
 - [x] Task 18: Implement the budget decision policy
 - [x] Task 19: Define persistence ports and DynamoDB keys
-- [ ] Task 20: Implement conditional workflow and idempotency storage
+- [x] Task 20: Implement conditional workflow and idempotency storage
 - [ ] Task 21: Implement object, history, and secret storage
 
 ### Checkpoint: Safety Core Proven
