@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter};
+
 use domain::WorkflowRevision;
 use domain::identity::{ConfirmationId, TopicSessionId, WorkflowId};
 use domain::{IdempotencyKey, OperationKind, OperationTargetFingerprint};
@@ -23,6 +25,14 @@ pub enum KeyError {
         component: &'static str,
     },
 }
+
+impl Display for KeyError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "invalid DynamoDB key: {self:?}")
+    }
+}
+
+impl std::error::Error for KeyError {}
 
 /// Reject control characters anywhere in a key component.
 fn validate_key_component(
