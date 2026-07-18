@@ -1,11 +1,11 @@
 use std::fmt::{Display, Formatter};
 
-use domain::identity::{ConfirmationId, ParticipantId, TopicSessionId, WorkflowId};
+use domain::identity::{ConfirmationId, MessageId, ParticipantId, TopicSessionId, WorkflowId};
 use domain::{
     AuthorizedActionAudit, ConfirmationAction, ConfirmationConsumePrecondition,
     ConfirmationConsumption, ConfirmationCorrectionOutcome, ConfirmationIssueOutcome,
     ConfirmationRecord, IdempotencyKey, OperationKind, TransitionOutcome, Workflow,
-    WorkflowRevision, WorkflowTimestamp,
+    WorkflowRevision, WorkflowStateKind, WorkflowTimestamp,
 };
 
 use crate::ports::{
@@ -56,6 +56,64 @@ impl PageRequest {
 pub enum ConditionalWriteOutcome {
     Committed,
     Conflict,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkflowCreationError {
+    NotInitial {
+        revision: WorkflowRevision,
+        state: WorkflowStateKind,
+    },
+}
+
+impl Display for WorkflowCreationError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "invalid workflow creation: {self:?}")
+    }
+}
+
+impl std::error::Error for WorkflowCreationError {}
+
+/// Initial workflow and request attribution persisted in one transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkflowCreation {
+    workflow: Workflow,
+    actor: ParticipantId,
+    source_message: MessageId,
+}
+
+impl WorkflowCreation {
+    pub fn new(
+        workflow: Workflow,
+        actor: ParticipantId,
+        source_message: MessageId,
+    ) -> Result<Self, WorkflowCreationError> {
+        if workflow.revision() != WorkflowRevision::INITIAL
+            || workflow.state().kind() != WorkflowStateKind::RequestAccepted
+        {
+            return Err(WorkflowCreationError::NotInitial {
+                revision: workflow.revision(),
+                state: workflow.state().kind(),
+            });
+        }
+        Ok(Self {
+            workflow,
+            actor,
+            source_message,
+        })
+    }
+
+    pub const fn workflow(&self) -> &Workflow {
+        &self.workflow
+    }
+
+    pub const fn actor(&self) -> ParticipantId {
+        self.actor
+    }
+
+    pub const fn source_message(&self) -> MessageId {
+        self.source_message
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -186,7 +244,10 @@ pub trait WorkflowRepository {
 
     async fn load(&self, workflow_id: &WorkflowId) -> Result<Option<Workflow>, Self::Error>;
     async fn load_by_topic(&self, topic: TopicSessionId) -> Result<Option<Workflow>, Self::Error>;
-    async fn create(&self, workflow: &Workflow) -> Result<ConditionalWriteOutcome, Self::Error>;
+    async fn create(
+        &self,
+        creation: &WorkflowCreation,
+    ) -> Result<ConditionalWriteOutcome, Self::Error>;
     async fn commit_transition(
         &self,
         transition: &TransitionOutcome,

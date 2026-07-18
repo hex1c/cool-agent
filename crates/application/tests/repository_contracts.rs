@@ -9,10 +9,12 @@ use application::ports::{
 };
 use application::repositories::{
     HistoryCheckpoint, HistorySequence, InvoiceMonth, MAX_PAGE_SIZE, PageRequest,
-    RepositoryValueError,
+    RepositoryValueError, WorkflowCreation, WorkflowCreationError,
 };
-use domain::WorkflowTimestamp;
-use domain::identity::WorkflowId;
+use domain::identity::{
+    ChatId, MessageId, MessageThreadId, ParticipantId, TopicSessionId, WorkflowId,
+};
+use domain::{TransitionRequest, WaitDeadline, Workflow, WorkflowTimestamp, WorkflowTransition};
 use serde::Deserialize;
 
 fn fixture(name: &str) -> PathBuf {
@@ -36,6 +38,40 @@ fn stored_object(workflow_id: WorkflowId, class: ObjectClass, key: &str) -> Stor
         media_type: "application/json".to_owned(),
         created_at: WorkflowTimestamp::from_unix_seconds(100),
     }
+}
+
+#[test]
+fn workflow_creation_requires_initial_state_and_captures_request_attribution()
+-> Result<(), Box<dyn std::error::Error>> {
+    let actor = ParticipantId::new(42)?;
+    let source_message = MessageId::new(7)?;
+    let initial = Workflow::new(
+        workflow("workflow-create"),
+        TopicSessionId::new(ChatId::new(-1001), MessageThreadId::new(9)?),
+        actor,
+        WorkflowTimestamp::from_unix_seconds(1),
+    );
+    let creation = WorkflowCreation::new(initial.clone(), actor, source_message)?;
+    assert_eq!(creation.workflow(), &initial);
+    assert_eq!(creation.actor(), actor);
+    assert_eq!(creation.source_message(), source_message);
+
+    let transitioned = initial
+        .transition(TransitionRequest {
+            transition: WorkflowTransition::BeginAttachmentCollection {
+                deadline: WaitDeadline::at(WorkflowTimestamp::from_unix_seconds(30)),
+            },
+            expected_revision: initial.revision(),
+            actor,
+            source_message,
+            timestamp: WorkflowTimestamp::from_unix_seconds(2),
+        })?
+        .workflow;
+    assert!(matches!(
+        WorkflowCreation::new(transitioned, actor, source_message),
+        Err(WorkflowCreationError::NotInitial { .. })
+    ));
+    Ok(())
 }
 
 #[test]
