@@ -84,18 +84,24 @@ Atomically:
 
 ### Consume or correct confirmation
 
-Atomically:
+Sensitive confirmation consumption and operation preparation are one transaction:
 
 - condition workflow revision equals `ConfirmationConsumePrecondition.expected_workflow_revision`;
 - condition confirmation status is pending and the confirmation ID matches;
-- update workflow and confirmation together for consumption, or update workflow and invalidate the pending confirmation for correction;
-- append transition and authorization audit entries.
+- validate before I/O that the operation key binds the resulting workflow ID and revision, confirmed mutation-target fingerprint, and permitted action kind;
+- update workflow and confirmation together;
+- append transition and authorization audit entries;
+- create the matching external-operation journal item in `prepared` state with `attribute_not_exists(PK)`.
 
-Replay, stale revision, or a race loser changes nothing.
+There is no public storage path that consumes a sensitive confirmation without preparing its operation journal. A correction uses the same workflow and pending-confirmation conditions, updates the workflow, invalidates the pending revision, and appends both audits, but creates no operation journal item. Replay, stale revision, mismatched operation binding, transaction failure, or a race loser changes nothing.
 
-### Reserve external operation
+### Prepare and execute an external operation
 
-The existing `OperationJournal.reserve` contract owns this boundary. Creating a new operation item uses a non-existence condition. Re-reading an identical key returns its durable state; a mismatched representation fails closed. Attempt-start is durable before provider invocation. Accepted, terminal, ambiguous, and exhausted outcomes are durable before replay.
+A journal item has four durable states: `prepared`, `retry_ready`, `attempt_started`, and `final`. Confirmation consumption creates `prepared` atomically as described above. A standalone non-confirmation operation may create the same state with a non-existence condition. Re-reading an identical key returns its durable state; a mismatched key representation fails closed.
+
+Immediately before provider invocation, `OperationJournal.begin_attempt` conditionally changes `prepared` or `retry_ready` to `attempt_started`, records the exact attempt number, and returns an opaque claim. Only the caller holding that claim may invoke the provider or complete the attempt. A concurrent race loser invokes nothing. A crash before `begin_attempt` leaves reclaimable prepared work; a crash after it leaves an in-progress attempt that requires manual review because provider acceptance is unknown.
+
+Completion conditions the journal state, exact attempt number, and claim. Retryable failure appends the completed attempt and returns to `retry_ready`. Accepted, terminal, or ambiguous outcomes become immutable `final` records; exhaustion also becomes final. Final records replay without provider invocation.
 
 ### Append history and object metadata
 

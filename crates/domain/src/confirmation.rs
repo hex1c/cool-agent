@@ -185,6 +185,30 @@ impl ConfirmationRecord {
         }
     }
 
+    /// The action selected when the preview was created.
+    pub const fn action(&self) -> ConfirmationAction {
+        match self {
+            Self::Pending(pending) => pending.action,
+            Self::Consumed(consumed) => consumed.pending.action,
+        }
+    }
+
+    /// The fingerprint of the exact external resource and mutation payload.
+    pub const fn mutation_target(&self) -> MutationTargetFingerprint {
+        match self {
+            Self::Pending(pending) => pending.mutation_target,
+            Self::Consumed(consumed) => consumed.pending.mutation_target,
+        }
+    }
+
+    /// The workflow revision after consumption, or None if still pending.
+    pub const fn resulting_workflow_revision(&self) -> Option<WorkflowRevision> {
+        match self {
+            Self::Pending(_) => None,
+            Self::Consumed(consumed) => Some(consumed.resulting_workflow_revision),
+        }
+    }
+
     /// Apply an approved correction and invalidate this pending revision.
     pub fn correct(
         &self,
@@ -285,6 +309,11 @@ impl ConfirmationRecord {
             confirmation_id: pending.confirmation_id.clone(),
             expected_confirmation_status: ConfirmationStatus::Pending,
         };
+        let authorization_audit = authorized_workflow_action_audit(
+            authorization,
+            request.source.topic,
+            request.source.message_id,
+        );
         let confirmation = Self::Consumed(ConsumedConfirmation {
             pending: pending.clone(),
             confirming_actor: authorization.actor(),
@@ -297,6 +326,7 @@ impl ConfirmationRecord {
         Ok(ConfirmationConsumption {
             transition,
             confirmation,
+            authorization: authorization_audit,
             precondition,
         })
     }
@@ -396,6 +426,7 @@ pub struct ConfirmationConsumePrecondition {
 pub struct ConfirmationConsumption {
     pub transition: TransitionOutcome,
     pub confirmation: ConfirmationRecord,
+    pub authorization: AuthorizedActionAudit,
     pub precondition: ConfirmationConsumePrecondition,
 }
 

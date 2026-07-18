@@ -2,8 +2,10 @@ use std::fmt::{Display, Formatter};
 
 use domain::identity::{ConfirmationId, ParticipantId, TopicSessionId, WorkflowId};
 use domain::{
+    AuthorizedActionAudit, ConfirmationAction, ConfirmationConsumePrecondition,
     ConfirmationConsumption, ConfirmationCorrectionOutcome, ConfirmationIssueOutcome,
-    ConfirmationRecord, TransitionOutcome, Workflow, WorkflowTimestamp,
+    ConfirmationRecord, IdempotencyKey, OperationKind, TransitionOutcome, Workflow,
+    WorkflowRevision, WorkflowTimestamp,
 };
 
 use crate::ports::{
@@ -191,6 +193,116 @@ pub trait WorkflowRepository {
     ) -> Result<ConditionalWriteOutcome, Self::Error>;
 }
 
+/// Rejected confirmation-to-operation binding.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ConsumeAndPrepareError {
+    WorkflowIdMismatch,
+    RevisionMismatch {
+        operation: WorkflowRevision,
+        confirmation: WorkflowRevision,
+    },
+    TargetMismatch,
+    InvalidActionKindPair {
+        action: ConfirmationAction,
+        kind: OperationKind,
+    },
+}
+
+impl Display for ConsumeAndPrepareError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "confirmation-to-operation binding rejected: {self:?}"
+        )
+    }
+}
+
+impl std::error::Error for ConsumeAndPrepareError {}
+
+/// Validated composite binding a consumed confirmation to its operation key.
+/// The constructor fails before I/O unless the domain guarantees hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsumeAndPrepareRequest {
+    pub consumption: ConfirmationConsumption,
+    pub operation_key: IdempotencyKey,
+}
+
+impl ConsumeAndPrepareRequest {
+    pub fn new(
+        consumption: ConfirmationConsumption,
+        operation_key: IdempotencyKey,
+    ) -> Result<Self, ConsumeAndPrepareError> {
+        let resulting_revision = consumption.transition.workflow.revision();
+
+        if operation_key.workflow_id() != consumption.transition.workflow.id() {
+            return Err(ConsumeAndPrepareError::WorkflowIdMismatch);
+        }
+        if operation_key.workflow_revision() != resulting_revision {
+            return Err(ConsumeAndPrepareError::RevisionMismatch {
+                operation: operation_key.workflow_revision(),
+                confirmation: resulting_revision,
+            });
+        }
+        let confirmation_action = consumption.confirmation.action();
+        let confirmation_target = consumption.confirmation.mutation_target();
+        if operation_key.target().as_bytes() != confirmation_target.as_bytes() {
+            return Err(ConsumeAndPrepareError::TargetMismatch);
+        }
+        Self::validate_action_kind_pair(confirmation_action, operation_key.operation_kind())?;
+
+        Ok(Self {
+            consumption,
+            operation_key,
+        })
+    }
+
+    fn validate_action_kind_pair(
+        action: ConfirmationAction,
+        kind: OperationKind,
+    ) -> Result<(), ConsumeAndPrepareError> {
+        let valid = matches!(
+            (action, kind),
+            (
+                ConfirmationAction::StartSheetOrDocWrite,
+                OperationKind::GoogleWrite
+            ) | (
+                ConfirmationAction::StartDirectPdfGeneration,
+                OperationKind::PdfRender
+            ) | (
+                ConfirmationAction::StartCalendarOrEmailAction,
+                OperationKind::GoogleWrite | OperationKind::SmtpSend,
+            )
+        );
+        if valid {
+            Ok(())
+        } else {
+            Err(ConsumeAndPrepareError::InvalidActionKindPair { action, kind })
+        }
+    }
+}
+
+/// Outcome of atomically consuming a confirmation and preparing its operation journal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConsumeAndPrepareOutcome {
+    pub transition: TransitionOutcome,
+    pub confirmation: ConfirmationRecord,
+    pub precondition: ConfirmationConsumePrecondition,
+    pub authorization_audit: AuthorizedActionAudit,
+    pub operation_key: IdempotencyKey,
+}
+
+impl From<ConsumeAndPrepareRequest> for ConsumeAndPrepareOutcome {
+    fn from(request: ConsumeAndPrepareRequest) -> Self {
+        Self {
+            transition: request.consumption.transition,
+            confirmation: request.consumption.confirmation,
+            precondition: request.consumption.precondition,
+            authorization_audit: request.consumption.authorization,
+            operation_key: request.operation_key,
+        }
+    }
+}
+
 #[allow(async_fn_in_trait)]
 pub trait ConfirmationRepository {
     type Error: Display;
@@ -204,9 +316,11 @@ pub trait ConfirmationRepository {
         &self,
         outcome: &ConfirmationIssueOutcome,
     ) -> Result<ConditionalWriteOutcome, Self::Error>;
-    async fn consume(
+    /// Atomically consume the confirmation and prepare the operation journal
+    /// entry so no crash window exists between the two writes.
+    async fn consume_and_prepare_operation(
         &self,
-        outcome: &ConfirmationConsumption,
+        request: &ConsumeAndPrepareRequest,
     ) -> Result<ConditionalWriteOutcome, Self::Error>;
     async fn correct(
         &self,
