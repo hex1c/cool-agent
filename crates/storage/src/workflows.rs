@@ -6,6 +6,7 @@ use aws_sdk_dynamodb::types::AttributeValue;
 use domain::identity::{TopicSessionId, WorkflowId};
 use domain::{TransitionAudit, TransitionOutcome, Workflow, WorkflowRevision, WorkflowStateKind};
 
+use crate::audit::StoredAudit;
 use crate::dynamodb::{DynamoDbStore, StorageError, deserialize_payload, serialize_payload};
 
 fn attribute_not_exists(expression: &str) -> String {
@@ -154,7 +155,8 @@ impl WorkflowRepository for DynamoDbStore {
             new_revision: WorkflowRevision::INITIAL,
             timestamp: workflow.updated_at(),
         };
-        let audit_payload = serialize_payload("audit", &creation_audit)?;
+        let audit_envelope = StoredAudit::Transition(creation_audit);
+        let audit_payload = serialize_payload("audit", &audit_envelope)?;
 
         let outcome = self
             .client()
@@ -168,7 +170,6 @@ impl WorkflowRepository for DynamoDbStore {
                             .item("sk", string_attr(wf_sk))
                             .item("entity", string_attr("workflow"))
                             .item("revision", number_attr(revision_num))
-                            .item("owner", number_attr(workflow.owner().get()))
                             .item("payload", string_attr(wf_payload))
                             .condition_expression(attribute_not_exists("pk"))
                             .build()
@@ -244,7 +245,8 @@ impl WorkflowRepository for DynamoDbStore {
             crate::keys::audit(workflow.id(), audit.new_revision).map_err(key_error)?;
 
         let new_payload = serialize_payload("workflow", workflow)?;
-        let audit_payload = serialize_payload("audit", audit)?;
+        let audit_envelope = StoredAudit::Transition(audit.clone());
+        let audit_payload = serialize_payload("audit", &audit_envelope)?;
         let new_revision = workflow.revision().get();
         let expected_revision = audit.old_revision.get();
 
