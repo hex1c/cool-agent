@@ -239,6 +239,13 @@ impl Debug for PresignedObjectLink {
     }
 }
 
+impl Drop for PresignedObjectLink {
+    fn drop(&mut self) {
+        let mut bytes = std::mem::take(&mut self.0).into_bytes();
+        bytes.fill(0);
+    }
+}
+
 #[allow(async_fn_in_trait)]
 pub trait ObjectStore {
     type Error: Display;
