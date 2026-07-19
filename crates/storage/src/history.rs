@@ -129,6 +129,53 @@ fn parse_sequence_from_sk(sk: &str) -> Result<HistorySequence, StorageError> {
     Ok(HistorySequence::new(value))
 }
 
+impl DynamoDbStore {
+    /// Strongly consistent read of a history-pointer item at `(pk, sk)`,
+    /// deserialization, and comparison against the requested payload. If
+    /// the stored record matches, the conflict is an idempotent retry and
+    /// `Committed` is returned. If the stored record differs or is
+    /// corrupt, `ConflictDifferent` is returned.
+    async fn verify_history_conflict(
+        &self,
+        pk: &str,
+        sk: &str,
+        expected: &StoredHistoryPointer,
+    ) -> Result<ConditionalWriteOutcome, StorageError> {
+        let output = self
+            .client()
+            .get_item()
+            .table_name(self.table_name())
+            .key("pk", string_attr(pk))
+            .key("sk", string_attr(sk))
+            .consistent_read(true)
+            .send()
+            .await
+            .map_err(|_| StorageError::Service {
+                operation: "verify history conflict",
+            })?;
+
+        let item = output.item.ok_or(StorageError::ConflictDifferent {
+            entity: "history pointer",
+        })?;
+
+        let entity = required_string_attribute(&item, "history pointer", "entity")?;
+        if entity != "history_pointer" {
+            return Err(StorageError::ConflictDifferent {
+                entity: "history pointer",
+            });
+        }
+        let payload = required_string_attribute(&item, "history pointer", "payload")?;
+        let stored: StoredHistoryPointer = deserialize_payload("history pointer", payload)?;
+        if stored == *expected {
+            Ok(ConditionalWriteOutcome::Committed)
+        } else {
+            Err(StorageError::ConflictDifferent {
+                entity: "history pointer",
+            })
+        }
+    }
+}
+
 // ── impl ───────────────────────────────────────────────────────────
 
 impl HistoryRepository for DynamoDbStore {
@@ -147,6 +194,8 @@ impl HistoryRepository for DynamoDbStore {
 
         let (pk, sk) = crate::keys::history_pointer(&checkpoint.workflow_id, checkpoint.sequence)
             .map_err(key_error)?;
+        let pk_for_conflict = pk.clone();
+        let sk_for_conflict = sk.clone();
 
         let stored = StoredHistoryPointer::from_checkpoint(checkpoint)?;
         let payload = serialize_payload("history pointer", &stored)?;
@@ -171,7 +220,12 @@ impl HistoryRepository for DynamoDbStore {
                     .as_service_error()
                     .is_some_and(|e| e.is_conditional_check_failed_exception()) =>
             {
-                Ok(ConditionalWriteOutcome::Conflict)
+                // A conditional failure means *something* exists at this
+                // key. Prove it is the same immutable checkpoint via a
+                // strongly consistent read; if the payload differs, this
+                // is a corruption/collision, not an idempotent retry.
+                self.verify_history_conflict(&pk_for_conflict, &sk_for_conflict, &stored)
+                    .await
             }
             Err(_) => Err(StorageError::Service {
                 operation: "append history pointer",

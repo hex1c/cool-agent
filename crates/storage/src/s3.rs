@@ -9,6 +9,7 @@ use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::ServerSideEncryption;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
+use std::sync::LazyLock;
 
 use crate::dynamodb::sha256_to_hex;
 
@@ -389,6 +390,43 @@ const CREDENTIAL_VALUE_MARKERS: &[&str] = &[
     "smtp://",
 ];
 
+/// High-signal regex patterns for unlabeled credentials that a producer
+/// might accidentally include in message content without any key name or
+/// labeled prefix. Each pattern is anchored to the structural form of the
+/// credential, not to surrounding text.
+#[allow(clippy::expect_used)] // patterns are compile-time constants
+static CREDENTIAL_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
+    // Patterns are intentionally specific to avoid false positives on
+    // ordinary prose. All use case-sensitive matching because these
+    // credential formats are structurally case-sensitive.
+    vec![
+        // AWS access key ID: AKIA/ASIA/ASCA/ANVA followed by 16 upper-case
+        // alphanumerics.
+        regex::Regex::new(r"(?:AKIA|ASIA|ASCA|ANVA)[0-9A-Z]{16}")
+            .expect("valid regex: aws access key"),
+        // PEM private key block (any key type).
+        regex::Regex::new(
+            r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----",
+        )
+        .expect("valid regex: pem key"),
+        // JWT: three base64url segments separated by dots, each starting
+        // with ey (the JSON `{` or `{"` prefix in base64url).
+        regex::Regex::new(r"eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}")
+            .expect("valid regex: jwt"),
+        // GitHub token: ghp_, gho_, ghu_, ghs_, or ghr_ followed by 36
+        // base62 characters.
+        regex::Regex::new(r"gh[pousr]_[A-Za-z0-9]{36}").expect("valid regex: github token"),
+        // Google API key: AIza followed by 35 base64url-safe characters.
+        regex::Regex::new(r"AIza[0-9A-Za-z_-]{35}").expect("valid regex: google api key"),
+        // Slack token: xox[baprs]- followed by at least 10 alphanumeric
+        // characters.
+        regex::Regex::new(r"xox[baprs]-[0-9A-Za-z-]{10,}").expect("valid regex: slack token"),
+        // Stripe key: sk_live_ or rk_live_ followed by alphanumeric
+        // characters.
+        regex::Regex::new(r"(?:sk|rk)_live_[0-9A-Za-z]{10,}").expect("valid regex: stripe key"),
+    ]
+});
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SanitizedHistoryDocument {
@@ -525,6 +563,16 @@ fn contains_credential_value(value: &str) -> bool {
                 .next()
                 .is_some_and(|character| character.is_ascii_whitespace())
         })
+        || contains_credential_pattern(value)
+}
+
+/// Detect high-signal credential *patterns* that do not rely on key names or
+/// labeled prefixes. These catch raw tokens that a producer might
+/// accidentally include in message content without any surrounding marker.
+fn contains_credential_pattern(value: &str) -> bool {
+    CREDENTIAL_PATTERNS
+        .iter()
+        .any(|pattern| pattern.is_match(value))
 }
 
 // ── ObjectStore impl ───────────────────────────────────────────────
@@ -965,6 +1013,64 @@ mod tests {
         let body3 = b"{\"msg\":\"Bearer\\r\\nsensitive\"}";
         assert!(matches!(
             validate_sanitized_history(body3, 1024),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+    }
+
+    #[test]
+    fn sanitized_history_rejects_unlabeled_credential_patterns() {
+        // AWS access key ID
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"use AKIAIOSFODNN7EXAMPLE to connect"}]}"#;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // PEM private key
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"assistant","content":"-----BEGIN RSA PRIVATE KEY-----\nMIIE..."}]}"#;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // JWT
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"tool","content":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"}]}"#;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // GitHub token
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"ghp_1234567890abcdefghijklmnopqrstuvwxyzABCD"}]}"#;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // Google API key
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"AIzaSyA1234567890abcdefghijklmnopqrstuvwxyzABCD"}]}"#;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // Slack token
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"assistant","content":"xoxb-1234567890-abcdefghij"}]}"#;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // Stripe live key
+        let stripe = concat!("sk_live_", "1234567890abcdefghijklmnopqrstuvwxyz");
+        let body = format!(
+            r#"{{"schemaVersion":"novus.sanitized-history.v1","messages":[{{"role":"user","content":"{}"}}]}}"#,
+            stripe,
+        )
+        .into_bytes();
+        let body: &[u8] = &body;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
             Err(S3ValidationError::CredentialValueMarker)
         ));
     }

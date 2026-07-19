@@ -27,7 +27,7 @@ use domain::{
     TransitionRequest, WaitDeadline, Workflow, WorkflowTimestamp, WorkflowTransition,
 };
 use storage::audit::StoredAudit;
-use storage::dynamodb::DynamoDbStore;
+use storage::dynamodb::{DynamoDbStore, StorageError};
 
 fn time(seconds: u64) -> WorkflowTimestamp {
     WorkflowTimestamp::from_unix_seconds(seconds)
@@ -143,7 +143,7 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
     let client = local_client();
     let table_name = format!("novus-test-{}", uuid::Uuid::new_v4().simple());
     create_table(&client, &table_name).await?;
-    let store = DynamoDbStore::new(client.clone(), table_name.clone(), [7; 32])?;
+    let store = DynamoDbStore::new(client.clone(), table_name.clone(), "dev", [7; 32])?;
 
     let initial = Workflow::new(
         WorkflowId::new("workflow-race")?,
@@ -402,7 +402,7 @@ async fn dynamodb_history_and_object_metadata_are_immutable_and_page_in_order()
     let client = local_client();
     let table_name = format!("novus-test-{}", uuid::Uuid::new_v4().simple());
     create_table(&client, &table_name).await?;
-    let store = DynamoDbStore::new(client.clone(), table_name.clone(), [7; 32])?;
+    let store = DynamoDbStore::new(client.clone(), table_name.clone(), "dev", [7; 32])?;
     let workflow_id = WorkflowId::new("workflow-storage-page")?;
 
     let raw_object = StoredObject {
@@ -419,10 +419,26 @@ async fn dynamodb_history_and_object_metadata_are_immutable_and_page_in_order()
         store.record(&raw_object).await?,
         ConditionalWriteOutcome::Committed
     );
+    // Same-content re-insert is idempotent success, not conflict.
     assert_eq!(
         store.record(&raw_object).await?,
-        ConditionalWriteOutcome::Conflict
+        ConditionalWriteOutcome::Committed
     );
+    // Different content at the same key is a corruption/collision.
+    let conflicting_object = StoredObject {
+        workflow_id: workflow_id.clone(),
+        object_id: StorageRecordId::new("attachment-9")?,
+        class: ObjectClass::RawInput,
+        storage_key: StorageKey::new("raw/workflow-storage-page/attachment-9.bin")?,
+        byte_length: 99,
+        sha256: [1; 32],
+        media_type: "application/octet-stream".to_owned(),
+        created_at: time(9),
+    };
+    assert!(matches!(
+        store.record(&conflicting_object).await,
+        Err(StorageError::ConflictDifferent { .. })
+    ));
     let objects =
         ObjectMetadataRepository::page(&store, &workflow_id, &PageRequest::new(10, None)?).await?;
     assert_eq!(objects.items, vec![raw_object]);
@@ -451,10 +467,35 @@ async fn dynamodb_history_and_object_metadata_are_immutable_and_page_in_order()
             store.append(&checkpoint).await?,
             ConditionalWriteOutcome::Committed
         );
+        // Same-content re-append is idempotent success, not conflict.
         assert_eq!(
             store.append(&checkpoint).await?,
-            ConditionalWriteOutcome::Conflict
+            ConditionalWriteOutcome::Committed
         );
+        // Different checkpoint at the same sequence is a corruption/collision.
+        let conflicting_checkpoint = HistoryCheckpoint {
+            workflow_id: workflow_id.clone(),
+            sequence: HistorySequence::new(sequence),
+            object: StoredObject {
+                workflow_id: workflow_id.clone(),
+                object_id: StorageRecordId::new(format!("history-{sequence}-diff"))?,
+                class: ObjectClass::SanitizedHistory,
+                storage_key: StorageKey::new(format!(
+                    "history/{workflow_id}/{sequence:020}-diff.json"
+                ))?,
+                byte_length: 77,
+                sha256: [3; 32],
+                media_type: "application/json".to_owned(),
+                created_at: time(sequence),
+            },
+            model_version: "model-v1".to_owned(),
+            prompt_version: "prompt-v1".to_owned(),
+            created_at: time(sequence),
+        };
+        assert!(matches!(
+            store.append(&conflicting_checkpoint).await,
+            Err(StorageError::ConflictDifferent { .. })
+        ));
     }
 
     let first_page =

@@ -113,6 +113,53 @@ fn required_string_attribute<'a>(
         .ok_or(StorageError::CorruptItem { entity, field })
 }
 
+impl DynamoDbStore {
+    /// Strongly consistent read of an object-metadata item at `(pk, sk)`,
+    /// deserialization, and comparison against the requested payload. If
+    /// the stored record matches, the conflict is an idempotent retry and
+    /// `Committed` is returned. If the stored record differs or is
+    /// corrupt, `ConflictDifferent` is returned.
+    async fn verify_object_conflict(
+        &self,
+        pk: &str,
+        sk: &str,
+        expected: &StoredObjectMetadata,
+    ) -> Result<ConditionalWriteOutcome, StorageError> {
+        let output = self
+            .client()
+            .get_item()
+            .table_name(self.table_name())
+            .key("pk", string_attr(pk))
+            .key("sk", string_attr(sk))
+            .consistent_read(true)
+            .send()
+            .await
+            .map_err(|_| StorageError::Service {
+                operation: "verify object conflict",
+            })?;
+
+        let item = output.item.ok_or(StorageError::ConflictDifferent {
+            entity: "object metadata",
+        })?;
+
+        let entity = required_string_attribute(&item, "object metadata", "entity")?;
+        if entity != "object_metadata" {
+            return Err(StorageError::ConflictDifferent {
+                entity: "object metadata",
+            });
+        }
+        let payload = required_string_attribute(&item, "object metadata", "payload")?;
+        let stored: StoredObjectMetadata = deserialize_payload("object metadata", payload)?;
+        if stored == *expected {
+            Ok(ConditionalWriteOutcome::Committed)
+        } else {
+            Err(StorageError::ConflictDifferent {
+                entity: "object metadata",
+            })
+        }
+    }
+}
+
 // ── impl ───────────────────────────────────────────────────────────
 
 impl ObjectMetadataRepository for DynamoDbStore {
@@ -127,6 +174,8 @@ impl ObjectMetadataRepository for DynamoDbStore {
         let (pk, sk) =
             crate::keys::object_metadata(&object.workflow_id, object.class, &object.object_id)
                 .map_err(key_error)?;
+        let pk_for_conflict = pk.clone();
+        let sk_for_conflict = sk.clone();
 
         let stored = StoredObjectMetadata::from_stored(object)?;
         let payload = serialize_payload("object metadata", &stored)?;
@@ -151,7 +200,12 @@ impl ObjectMetadataRepository for DynamoDbStore {
                     .as_service_error()
                     .is_some_and(|e| e.is_conditional_check_failed_exception()) =>
             {
-                Ok(ConditionalWriteOutcome::Conflict)
+                // A conditional failure means *something* exists at this
+                // key. Prove it is the same immutable object via a strongly
+                // consistent read; if the payload differs, this is a
+                // corruption/collision, not an idempotent retry.
+                self.verify_object_conflict(&pk_for_conflict, &sk_for_conflict, &stored)
+                    .await
             }
             Err(_) => Err(StorageError::Service {
                 operation: "record object metadata",

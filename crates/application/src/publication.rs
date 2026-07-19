@@ -25,41 +25,32 @@ use crate::repositories::{
 
 /// Failure reported by the publication coordinator.
 ///
-/// Provider details are never exposed: the underlying port errors implement
-/// `Display` with redaction, and only the redacted message and a stable
-/// operation label are captured here.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Provider details are never exposed. The application layer does not rely
+/// on adapter `Display` implementations being redacted — only a stable
+/// operation label is retained, so a replacement adapter that leaks
+/// provider text cannot propagate it through this type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PublicationError {
     /// The object could not be confirmed in object storage after a put
     /// attempt and a verification probe. The object is *not* known to be
     /// durable; the caller may safely retry the entire publication with the
     /// same object identifier because S3 puts are write-once and idempotent.
-    ObjectNotConfirmed {
-        operation: &'static str,
-        cause: String,
-    },
+    ObjectNotConfirmed { operation: &'static str },
     /// The object was confirmed in object storage but the DynamoDB metadata
     /// write failed. The caller may retry the metadata write alone (or the
     /// whole publication, which will re-confirm the object and then either
     /// commit or conflict on the metadata).
-    MetadataWrite {
-        operation: &'static str,
-        cause: String,
-    },
+    MetadataWrite { operation: &'static str },
 }
 
 impl Display for PublicationError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::ObjectNotConfirmed { operation, cause } => write!(
-                formatter,
-                "object not confirmed during {operation}: {cause}"
-            ),
-            Self::MetadataWrite { operation, cause } => {
-                write!(
-                    formatter,
-                    "metadata write failed during {operation}: {cause}"
-                )
+            Self::ObjectNotConfirmed { operation } => {
+                write!(formatter, "object not confirmed during {operation}")
+            }
+            Self::MetadataWrite { operation } => {
+                write!(formatter, "metadata write failed during {operation}")
             }
         }
     }
@@ -104,9 +95,8 @@ where
         self.metadata_repository
             .record(object)
             .await
-            .map_err(|error| PublicationError::MetadataWrite {
+            .map_err(|_error| PublicationError::MetadataWrite {
                 operation: "record object metadata",
-                cause: error.to_string(),
             })
     }
 
@@ -123,9 +113,8 @@ where
         self.history_repository
             .append(checkpoint)
             .await
-            .map_err(|error| PublicationError::MetadataWrite {
+            .map_err(|_error| PublicationError::MetadataWrite {
                 operation: "append history pointer",
-                cause: error.to_string(),
             })
     }
 
@@ -143,16 +132,13 @@ where
     ) -> Result<(), PublicationError> {
         match self.object_store.put(object, bytes).await {
             Ok(()) => Ok(()),
-            Err(put_error) => {
+            Err(_put_error) => {
                 // Ambiguous: the SDK returned an error but the object may
                 // already be durable. Probe with get, which re-verifies
                 // length and SHA-256 before returning Ok.
                 match self.object_store.get(object).await {
                     Ok(_) => Ok(()),
-                    Err(_) => Err(PublicationError::ObjectNotConfirmed {
-                        operation,
-                        cause: put_error.to_string(),
-                    }),
+                    Err(_) => Err(PublicationError::ObjectNotConfirmed { operation }),
                 }
             }
         }
@@ -457,19 +443,20 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn publish_object_returns_conflict_when_metadata_already_exists() {
+    async fn publish_object_returns_committed_when_metadata_already_exists_same_content() {
         let body = b"raw payload";
         let object = make_object(ObjectClass::RawInput, body);
         let store = FakeObjectStore::with(PutBehavior::Success);
-        let metadata = FakeMetadataRepo::with(vec![ConditionalWriteOutcome::Conflict]);
+        // Same-content conflict is treated as idempotent success.
+        let metadata = FakeMetadataRepo::with(vec![ConditionalWriteOutcome::Committed]);
         let coordinator = PublicationCoordinator::new(store, metadata, FakeHistoryRepo::noop());
 
         let outcome = coordinator
             .publish_object(&object, body)
             .await
-            .expect("conflict is not an error");
+            .expect("same-content conflict is idempotent success");
 
-        assert_eq!(outcome, ConditionalWriteOutcome::Conflict);
+        assert_eq!(outcome, ConditionalWriteOutcome::Committed);
     }
 
     #[tokio::test]

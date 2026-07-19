@@ -19,6 +19,8 @@ pub enum StoreValidationError {
     TableNameTooShort { length: usize, minimum: usize },
     TableNameTooLong { length: usize, maximum: usize },
     TableNameInvalidCharacters,
+    EnvironmentEmpty,
+    EnvironmentInvalidCharacters,
     InvalidPageTokenKey,
     Key(super::keys::KeyError),
     PayloadTooLarge { bytes: usize, maximum: usize },
@@ -42,6 +44,10 @@ impl Display for StoreValidationError {
             ),
             Self::TableNameInvalidCharacters => {
                 formatter.write_str("table name contains invalid characters")
+            }
+            Self::EnvironmentEmpty => formatter.write_str("environment is empty"),
+            Self::EnvironmentInvalidCharacters => {
+                formatter.write_str("environment contains invalid characters")
             }
             Self::InvalidPageTokenKey => formatter.write_str("page token signing key is invalid"),
             Self::Key(error) => write!(formatter, "key error: {error:?}"),
@@ -86,6 +92,12 @@ pub enum StorageError {
     Service {
         operation: &'static str,
     },
+    /// A conditional write failed because a *different* immutable record
+    /// already exists at the same key. This is a corruption/collision, not
+    /// an idempotent retry of the same content.
+    ConflictDifferent {
+        entity: &'static str,
+    },
 }
 
 impl Display for StorageError {
@@ -106,6 +118,12 @@ impl Display for StorageError {
             }
             Self::Service { operation } => {
                 write!(formatter, "DynamoDB {operation} failed")
+            }
+            Self::ConflictDifferent { entity } => {
+                write!(
+                    formatter,
+                    "a different {entity} already exists at the same key"
+                )
             }
         }
     }
@@ -135,6 +153,7 @@ impl From<StoreValidationError> for StorageError {
 pub struct DynamoDbStore {
     client: aws_sdk_dynamodb::Client,
     table_name: String,
+    environment: String,
     page_token_key: [u8; 32],
 }
 
@@ -144,6 +163,7 @@ impl std::fmt::Debug for DynamoDbStore {
             .debug_struct("DynamoDbStore")
             .field("client", &"[REDACTED]")
             .field("table_name", &self.table_name)
+            .field("environment", &self.environment)
             .field("page_token_key", &"[REDACTED]")
             .finish()
     }
@@ -159,22 +179,30 @@ impl DynamoDbStore {
     pub fn new(
         client: aws_sdk_dynamodb::Client,
         table_name: impl Into<String>,
+        environment: impl Into<String>,
         page_token_key: [u8; 32],
     ) -> Result<Self, StoreValidationError> {
         let table_name = table_name.into();
+        let environment = environment.into();
         validate_table_name(&table_name)?;
+        validate_environment(&environment)?;
         if page_token_key.iter().all(|byte| *byte == 0) {
             return Err(StoreValidationError::InvalidPageTokenKey);
         }
         Ok(Self {
             client,
             table_name,
+            environment,
             page_token_key,
         })
     }
 
     pub fn table_name(&self) -> &str {
         &self.table_name
+    }
+
+    pub fn environment(&self) -> &str {
+        &self.environment
     }
 
     pub fn client(&self) -> &aws_sdk_dynamodb::Client {
@@ -203,6 +231,20 @@ fn validate_table_name(value: &str) -> Result<(), StoreValidationError> {
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
     {
         return Err(StoreValidationError::TableNameInvalidCharacters);
+    }
+    Ok(())
+}
+
+fn validate_environment(value: &str) -> Result<(), StoreValidationError> {
+    if value.is_empty() {
+        return Err(StoreValidationError::EnvironmentEmpty);
+    }
+    if value.len() > 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(StoreValidationError::EnvironmentInvalidCharacters);
     }
     Ok(())
 }
@@ -251,6 +293,7 @@ impl std::error::Error for PageTokenError {}
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredPageToken {
+    environment: String,
     table_name: String,
     query_family: String,
     scan_forward: bool,
@@ -272,6 +315,7 @@ impl DynamoDbStore {
         let pk = required_page_key(last_evaluated_key, "pk")?;
         let sk = required_page_key(last_evaluated_key, "sk")?;
         let payload = serde_json::to_vec(&StoredPageToken {
+            environment: self.environment.clone(),
             table_name: self.table_name.clone(),
             query_family: query_family.to_owned(),
             scan_forward,
@@ -317,6 +361,9 @@ impl DynamoDbStore {
         let parsed: StoredPageToken =
             serde_json::from_slice(&payload).map_err(|_| page_token_error("invalid payload"))?;
 
+        if parsed.environment != self.environment {
+            return Err(page_token_error("environment mismatch"));
+        }
         if parsed.table_name != self.table_name {
             return Err(page_token_error("table mismatch"));
         }
@@ -464,17 +511,25 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let client = test_client();
         assert!(matches!(
-            DynamoDbStore::new(client.clone(), "", [7; 32]),
+            DynamoDbStore::new(client.clone(), "", "dev", [7; 32]),
             Err(StoreValidationError::TableNameEmpty)
         ));
         assert!(matches!(
-            DynamoDbStore::new(client.clone(), "novus-app-dev", [0; 32]),
+            DynamoDbStore::new(client.clone(), "novus-app-dev", "", [7; 32]),
+            Err(StoreValidationError::EnvironmentEmpty)
+        ));
+        assert!(matches!(
+            DynamoDbStore::new(client.clone(), "novus-app-dev", "dev!", [7; 32]),
+            Err(StoreValidationError::EnvironmentInvalidCharacters)
+        ));
+        assert!(matches!(
+            DynamoDbStore::new(client.clone(), "novus-app-dev", "dev", [0; 32]),
             Err(StoreValidationError::InvalidPageTokenKey)
         ));
-        let store = DynamoDbStore::new(client, "novus-app-dev", [7; 32])?;
+        let store = DynamoDbStore::new(client, "novus-app-dev", "dev", [7; 32])?;
         assert_eq!(
             format!("{store:?}"),
-            "DynamoDbStore { client: \"[REDACTED]\", table_name: \"novus-app-dev\", page_token_key: \"[REDACTED]\" }"
+            "DynamoDbStore { client: \"[REDACTED]\", table_name: \"novus-app-dev\", environment: \"dev\", page_token_key: \"[REDACTED]\" }"
         );
         Ok(())
     }
@@ -510,15 +565,22 @@ mod tests {
                 ),
             ),
         ]);
-        let store = DynamoDbStore::new(test_client(), "novus-app-dev", [7; 32])?;
+        let store = DynamoDbStore::new(test_client(), "novus-app-dev", "dev", [7; 32])?;
         let token = store.encode_page_token(&key, "history", true)?;
         let decoded = store
             .decode_page_token(&token, "history", true, "WF#workflow-1", "HISTORY#")
             .expect("matching token should decode");
         assert_eq!(decoded, key);
 
-        let other_table = DynamoDbStore::new(test_client(), "novus-app-prod", [7; 32])?;
-        let other_key = DynamoDbStore::new(test_client(), "novus-app-dev", [8; 32])?;
+        // Same table name but different environment — token must be rejected.
+        let other_env = DynamoDbStore::new(test_client(), "novus-app-dev", "prod", [7; 32])?;
+        let other_table = DynamoDbStore::new(test_client(), "novus-app-prod", "dev", [7; 32])?;
+        let other_key = DynamoDbStore::new(test_client(), "novus-app-dev", "dev", [8; 32])?;
+        assert!(
+            other_env
+                .decode_page_token(&token, "history", true, "WF#workflow-1", "HISTORY#")
+                .is_err()
+        );
         assert!(
             other_table
                 .decode_page_token(&token, "history", true, "WF#workflow-1", "HISTORY#")
@@ -563,8 +625,8 @@ mod tests {
     #[test]
     fn signed_page_tokens_reject_unknown_fields() -> Result<(), Box<dyn std::error::Error>> {
         use base64::Engine;
-        let store = DynamoDbStore::new(test_client(), "novus-app-dev", [7; 32])?;
-        let payload = br#"{"table_name":"novus-app-dev","query_family":"history","scan_forward":true,"pk":"WF#workflow-1","sk":"HISTORY#1","extra":true}"#;
+        let store = DynamoDbStore::new(test_client(), "novus-app-dev", "dev", [7; 32])?;
+        let payload = br#"{"environment":"dev","table_name":"novus-app-dev","query_family":"history","scan_forward":true,"pk":"WF#workflow-1","sk":"HISTORY#1","extra":true}"#;
         let tag = store.page_token_tag(payload)?;
         let encoding = base64::engine::general_purpose::URL_SAFE_NO_PAD;
         let token = format!("{}.{}", encoding.encode(payload), encoding.encode(tag));
