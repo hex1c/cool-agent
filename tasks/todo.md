@@ -599,6 +599,11 @@ guards.
 - [ ] Object publication coordinator proves S3 acceptance before publishing DynamoDB object/history pointers, disambiguates ambiguous S3 outcomes, and fails closed when the object cannot be confirmed.
 - [ ] Pagination tokens are authenticated (HMAC-SHA256) and bound to the exact table, repository/query family, scan direction, workflow partition, and sort-key family.
 
+**Approved security exceptions:**
+
+1. **Per-class IAM access policies** — Deferred to Task 39A. No shared environment should deploy before Task 39A provides reviewed prefix-scoped IAM and environment-isolation controls.
+2. **In-process trust boundary** — `SecretValue::new` is `#[doc(hidden)] pub` and `HistorySanitizer::from_secret_values` is `pub` because Rust's visibility system does not allow `pub(crate)` construction across crate boundaries (the `SecretProvider` adapter is in the storage crate). The threat model treats the Lambda process boundary as the trust boundary: all deployed code is trusted, no untrusted code runs in-process. Defense is against external input (webhook payloads, user messages), not in-process code. A future dedicated secrets-runtime crate could provide sealed provenance if cross-crate trust separation is required.
+
 **Verification:**
 
 - [ ] Unit tests pass: `cargo test -p storage --lib`

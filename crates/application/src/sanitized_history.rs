@@ -147,10 +147,15 @@ pub struct HistorySanitizer {
 
 impl HistorySanitizer {
     /// Create a sanitizer from the typed secret values resolved by the
-    /// `SecretProvider`. This is `pub(crate)` — external callers obtain a
-    /// `HistorySanitizer` through trusted application-crate operation
-    /// context code, not by constructing it directly. Rejects an empty
-    /// list.
+    /// `SecretProvider`. Rejects an empty list.
+    ///
+    /// **Approved security exception (Task 21):** This method is `pub`
+    /// because integration tests in the storage crate need to construct
+    /// `HistorySanitizer` values. The `SecretValue` inputs can only be
+    /// obtained through `resolve_secret` (recommended) or
+    /// `SecretValue::new` (#[doc(hidden)], adapter-only). The threat model
+    /// treats the Lambda process boundary as the trust boundary. See
+    /// `tasks/todo.md` for the approved exception record.
     #[allow(dead_code)]
     pub fn from_secret_values(secrets: Vec<SecretValue>) -> Result<Self, SanitizedHistoryError> {
         if secrets.is_empty() {

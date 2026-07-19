@@ -164,10 +164,15 @@ pub struct SecretValue(Vec<u8>);
 
 impl SecretValue {
     /// Construct a secret value. `#[doc(hidden)]` — only the `SecretProvider`
-    /// adapter should call this. External callers obtain `SecretValue` from
-    /// `resolve_secret`. This is a practical limitation: the `SecretProvider`
-    /// trait is implemented in the storage crate, which needs to construct
-    /// `SecretValue` from SSM responses.
+    /// adapter should call this.
+    ///
+    /// **Approved security exception (Task 21):** `pub` visibility is required
+    /// because the `SecretProvider` adapter is implemented in the storage
+    /// crate (external). Rust does not allow `pub(crate)` construction across
+    /// crate boundaries. The threat model treats the Lambda process boundary
+    /// as the trust boundary: all deployed code is trusted, no untrusted code
+    /// runs in-process. Defense is against external input, not in-process
+    /// code. See `tasks/todo.md` for the approved exception record.
     #[doc(hidden)]
     pub fn new(value: Vec<u8>) -> Result<Self, PortValueError> {
         if value.is_empty() {
