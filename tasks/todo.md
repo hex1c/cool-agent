@@ -665,13 +665,13 @@ separate topic workflow delivery from private OAuth delivery.
 
 **Acceptance criteria:**
 
-- [ ] Start mentions and follow-up `/done`, `/status`, `/correct`, `/confirm`, `/stop` target only the current topic workflow.
-- [ ] Callback replay and stale preview revisions are rejected.
-- [ ] OAuth material cannot pass through topic delivery; Telegram sends use the shared three-attempt executor and persist terminal failures.
+- [x] Start mentions and follow-up `/done`, `/status`, `/correct`, `/confirm`, `/stop` target only the current topic workflow.
+- [x] Callback replay and stale preview revisions are rejected.
+- [x] OAuth material cannot pass through topic delivery; Telegram sends use the shared three-attempt executor and persist terminal failures.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p telegram commands callbacks delivery_privacy`
+- [x] Tests pass: `cargo test -p telegram commands callbacks delivery_privacy`
 
 **Dependencies:** Tasks 16, 22
 

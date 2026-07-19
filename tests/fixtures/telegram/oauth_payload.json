@@ -1,0 +1,6 @@
+{
+  "oauth_connect_url": "https://accounts.google.com/o/oauth2/auth?client_id=example.apps.googleusercontent.com&redirect_uri=https://example.org/oauth/callback&response_type=code&scope=https://www.googleapis.com/auth/drive.file",
+  "access_token_example": "ya29.a0AfH6SMBx-ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+  "refresh_token_example": "1//0123456789ABCDEF-abcdefghijklmnopqrstuvwxyz",
+  "authorization_code_example": "4/0AanRRrvWxyzABCDEFGHIJKLMNOPQRSTUVWXYZ012345"
+}
