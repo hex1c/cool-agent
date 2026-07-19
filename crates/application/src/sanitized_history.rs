@@ -106,16 +106,26 @@ impl SanitizedHistory {
             });
         }
 
+        // Deduplicate and sort secrets by length (longest first) so that
+        // overlapping secrets are fully redacted before shorter substrings
+        // are applied. This prevents partial leakage when one secret is a
+        // substring of another.
+        let mut secrets: Vec<&str> = known_secrets
+            .iter()
+            .copied()
+            .filter(|secret| !secret.is_empty())
+            .collect();
+        secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+        secrets.dedup();
+
         let mut messages = Vec::with_capacity(raw_messages.len());
         for (role, mut content) in raw_messages {
             if content.is_empty() {
                 return Err(SanitizedHistoryError::EmptyContent);
             }
-            // Deterministically redact known secret values.
-            for secret in known_secrets {
-                if !secret.is_empty() {
-                    content = content.replace(secret, REDACTED_MARKER);
-                }
+            // Deterministically redact known secret values, longest first.
+            for secret in &secrets {
+                content = content.replace(secret, REDACTED_MARKER);
             }
             if content.len() > MAX_CONTENT_BYTES {
                 return Err(SanitizedHistoryError::ContentTooLarge {
@@ -269,6 +279,27 @@ mod tests {
         assert!(!text.contains(&oauth));
         assert!(!text.contains(&smtp));
         assert!(text.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn redacts_overlapping_secrets_longest_first() {
+        // When one secret is a substring of another, the longer secret
+        // must be redacted first to prevent partial leakage.
+        let long = format!("{}_{}_{}", "alpha", "beta", "gamma");
+        let short = format!("{}_{}", "alpha", "beta");
+        let history = SanitizedHistory::new(
+            vec![(SanitizedRole::User, format!("value is {long} here"))],
+            &[&long, &short],
+        )
+        .expect("valid history");
+
+        let serialized = history.serialize().expect("serialize");
+        let text = std::str::from_utf8(&serialized).expect("utf-8");
+        assert!(!text.contains(&long), "long secret must be fully redacted");
+        assert!(
+            !text.contains(&short),
+            "short secret must be fully redacted"
+        );
     }
 
     #[test]

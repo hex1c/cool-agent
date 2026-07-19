@@ -18,7 +18,7 @@
 
 use std::fmt::{Display, Formatter};
 
-use crate::ports::{ObjectStore, StoredObject};
+use crate::ports::{ObjectClass, ObjectStore, StoredObject};
 use crate::repositories::{
     ConditionalWriteOutcome, HistoryCheckpoint, HistoryRepository, ObjectMetadataRepository,
 };
@@ -48,6 +48,12 @@ pub enum PublicationError {
     HistorySerializationMismatch,
     /// The SanitizedHistory could not be serialized.
     HistorySerializationFailed,
+    /// The caller attempted to publish a SanitizedHistory object through
+    /// `publish_object` instead of `publish_history`, which would bypass
+    /// the producer-owned SanitizedHistory type.
+    ObjectClassRequiresTypedPublication,
+    /// The checkpoint failed validation before I/O.
+    InvalidCheckpoint,
 }
 
 impl Display for PublicationError {
@@ -65,6 +71,10 @@ impl Display for PublicationError {
             Self::HistorySerializationFailed => {
                 formatter.write_str("failed to serialize sanitized history")
             }
+            Self::ObjectClassRequiresTypedPublication => {
+                formatter.write_str("sanitized history must be published through publish_history")
+            }
+            Self::InvalidCheckpoint => formatter.write_str("history checkpoint failed validation"),
         }
     }
 }
@@ -104,6 +114,12 @@ where
         object: &StoredObject,
         bytes: &[u8],
     ) -> Result<ConditionalWriteOutcome, PublicationError> {
+        // SanitizedHistory must be published through publish_history, which
+        // enforces the producer-owned SanitizedHistory type. Reject it here
+        // to prevent bypassing redaction via the raw-bytes path.
+        if object.class == ObjectClass::SanitizedHistory {
+            return Err(PublicationError::ObjectClassRequiresTypedPublication);
+        }
         self.confirm_object(object, bytes, "put object").await?;
         self.metadata_repository
             .record(object)
@@ -122,6 +138,12 @@ where
         checkpoint: &HistoryCheckpoint,
         history: &SanitizedHistory,
     ) -> Result<ConditionalWriteOutcome, PublicationError> {
+        // Validate the checkpoint before any I/O so an artifact-class or
+        // wrong-workflow checkpoint is rejected before S3 accepts the body.
+        checkpoint
+            .validate()
+            .map_err(|_| PublicationError::InvalidCheckpoint)?;
+
         let bytes = history
             .serialize()
             .map_err(|_| PublicationError::HistorySerializationFailed)?;
@@ -179,9 +201,7 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
-    use crate::ports::{
-        ObjectClass, Page, PageToken, PortValueError, StorageKey, StorageRecordId,
-    };
+    use crate::ports::{ObjectClass, Page, PageToken, PortValueError, StorageKey, StorageRecordId};
     use crate::repositories::PageRequest;
     use crate::sanitized_history::{SanitizedHistory, SanitizedRole};
     use domain::WorkflowTimestamp;
@@ -420,6 +440,25 @@ mod tests {
     }
 
     // ── Tests ───────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn publish_object_rejects_sanitized_history_class() {
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[]}"#;
+        let object = make_object(ObjectClass::SanitizedHistory, body);
+        let store = FakeObjectStore::with(PutBehavior::Success);
+        let metadata = FakeMetadataRepo::with(vec![ConditionalWriteOutcome::Committed]);
+        let coordinator = PublicationCoordinator::new(store, metadata, FakeHistoryRepo::noop());
+
+        let error = coordinator
+            .publish_object(&object, body)
+            .await
+            .expect_err("SanitizedHistory must go through publish_history");
+
+        assert!(
+            matches!(error, PublicationError::ObjectClassRequiresTypedPublication),
+            "expected ObjectClassRequiresTypedPublication, got {error:?}"
+        );
+    }
 
     #[tokio::test]
     async fn publish_object_puts_then_records_on_success() {
