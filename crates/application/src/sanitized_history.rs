@@ -124,7 +124,9 @@ impl NoSecretsUsed {
     /// Explicitly attest that no secrets were used. This is `pub(crate)`
     /// so only trusted application-crate code can produce this attestation;
     /// external callers must obtain it from a trusted operation context.
-    #[cfg(test)]
+    /// Only application-crate code can produce this attestation via
+    /// `attest()`; external callers must obtain a `HistorySanitizer`
+    /// from trusted application-crate operation context code.
     #[allow(dead_code)]
     pub(crate) const fn attest() -> Self {
         Self { _private: () }
@@ -144,12 +146,15 @@ pub struct HistorySanitizer {
 }
 
 impl HistorySanitizer {
-    /// Create a sanitizer from the typed secret values that were used
-    /// during the conversation. Every occurrence of each secret in message
-    /// content will be replaced with `[REDACTED]`. Rejects an empty list —
-    /// use [`HistorySanitizer::no_secrets`] with a [`NoSecretsUsed`]
-    /// attestation for conversations where no secrets were used.
-    pub fn from_secret_values(secrets: Vec<SecretValue>) -> Result<Self, SanitizedHistoryError> {
+    /// Create a sanitizer from the typed secret values resolved by the
+    /// `SecretProvider`. This is `pub(crate)` — external callers obtain a
+    /// `HistorySanitizer` through trusted application-crate operation
+    /// context code, not by constructing it directly. Rejects an empty
+    /// list.
+    #[allow(dead_code)]
+    pub(crate) fn from_secret_values(
+        secrets: Vec<SecretValue>,
+    ) -> Result<Self, SanitizedHistoryError> {
         if secrets.is_empty() {
             return Err(SanitizedHistoryError::EmptySecretProvenance);
         }
@@ -162,9 +167,10 @@ impl HistorySanitizer {
     }
 
     /// Create a sanitizer for conversations where no secrets were used.
-    /// Requires an explicit [`NoSecretsUsed`] attestation — only
-    /// application-crate code can produce this attestation.
-    pub fn no_secrets(_attestation: NoSecretsUsed) -> Self {
+    /// `pub(crate)` — only trusted application-crate code can produce the
+    /// required [`NoSecretsUsed`] attestation.
+    #[allow(dead_code)]
+    pub(crate) fn no_secrets(_attestation: NoSecretsUsed) -> Self {
         Self { secrets: vec![] }
     }
 
@@ -247,6 +253,16 @@ impl SanitizedHistory {
 
     pub fn message_count(&self) -> usize {
         self.messages.len()
+    }
+
+    /// Construct a `SanitizedHistory` for cross-crate integration tests.
+    /// This bypasses the `HistorySanitizer` provenance check and should
+    /// only be used in test code.
+    #[doc(hidden)]
+    pub fn for_testing(
+        raw_messages: Vec<(SanitizedRole, String)>,
+    ) -> Result<Self, SanitizedHistoryError> {
+        Self::new(raw_messages, &[])
     }
 }
 

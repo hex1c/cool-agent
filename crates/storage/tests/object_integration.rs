@@ -139,13 +139,11 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
 
     // History: create a SanitizedHistory, serialize it, and build the
     // StoredObject from the serialized bytes so hash/length match.
-    use application::ports::SecretValue;
-    use application::sanitized_history::{HistorySanitizer, SanitizedRole};
-    let safe_history = HistorySanitizer::from_secret_values(vec![
-        SecretValue::new(b"unused-secret".to_vec()).expect("non-empty"),
-    ])
-    .expect("non-empty secrets")
-    .sanitize(vec![(SanitizedRole::User, "hello".to_owned())])
+    use application::sanitized_history::SanitizedRole;
+    let safe_history = application::sanitized_history::SanitizedHistory::for_testing(vec![(
+        SanitizedRole::User,
+        "hello".to_owned(),
+    )])
     .expect("valid history");
     let history_bytes = safe_history.serialize().expect("should serialize");
     use sha2::{Digest, Sha256};
@@ -172,11 +170,7 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
     assert_eq!(store.get_history(&history).await?, history_bytes);
 
     // Unsafe history: credential key in content that sanitizer didn't redact.
-    let unsafe_sanitized = HistorySanitizer::from_secret_values(vec![
-        SecretValue::new(b"unused-secret".to_vec()).expect("non-empty"),
-    ])
-    .expect("non-empty secrets")
-    .sanitize(vec![(
+    let unsafe_sanitized = application::sanitized_history::SanitizedHistory::for_testing(vec![(
         SanitizedRole::User,
         "the refresh_token=must-not-persist was leaked".to_owned(),
     )])

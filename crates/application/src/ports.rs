@@ -163,6 +163,11 @@ impl SecretReference {
 pub struct SecretValue(Vec<u8>);
 
 impl SecretValue {
+    /// Construct a secret value. `#[doc(hidden)]` to discourage external
+    /// use — only the `SecretProvider` adapter should create `SecretValue`
+    /// instances. External callers obtain them from
+    /// `SecretProvider::get_secret`.
+    #[doc(hidden)]
     pub fn new(value: Vec<u8>) -> Result<Self, PortValueError> {
         if value.is_empty() {
             return Err(PortValueError::Empty {

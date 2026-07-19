@@ -1029,11 +1029,7 @@ mod tests {
         // Build the StoredObject from the serialized bytes so hash/length
         // match, then verify the storage-layer regex catches it.
         let unsafe_sanitized =
-            application::sanitized_history::HistorySanitizer::from_secret_values(vec![
-                application::ports::SecretValue::new(b"unused-secret".to_vec()).expect("non-empty"),
-            ])
-            .expect("non-empty secrets")
-            .sanitize(vec![(
+            application::sanitized_history::SanitizedHistory::for_testing(vec![(
                 application::sanitized_history::SanitizedRole::User,
                 "the refresh_token=sensitive was leaked".to_owned(),
             )])
