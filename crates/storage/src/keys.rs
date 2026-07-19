@@ -1,5 +1,7 @@
 use std::fmt::{Display, Formatter};
 
+use application::ports::{ObjectClass, StorageRecordId};
+use application::repositories::HistorySequence;
 use domain::WorkflowRevision;
 use domain::identity::{ConfirmationId, TopicSessionId, WorkflowId};
 use domain::{IdempotencyKey, OperationKind, OperationTargetFingerprint};
@@ -157,6 +159,44 @@ pub fn operation_journal(key: &IdempotencyKey) -> Result<(String, String), KeyEr
     validate_key_component("operation sk", &sk, MAX_SORT_KEY_LENGTH)?;
     Ok((pk, sk))
 }
+
+/// Produce the partition key and sort key for a sanitized history
+/// pointer. Sequences use zero-padded 20-digit decimal encoding so
+/// lexical order equals numeric order.
+pub fn history_pointer(
+    workflow_id: &WorkflowId,
+    sequence: HistorySequence,
+) -> Result<(String, String), KeyError> {
+    let pk = format!("WF#{}", workflow_id);
+    let sk = format!("HISTORY#{:020}", sequence.get());
+    validate_key_component("history pk", &pk, MAX_PARTITION_KEY_LENGTH)?;
+    validate_key_component("history sk", &sk, MAX_SORT_KEY_LENGTH)?;
+    Ok((pk, sk))
+}
+
+/// Return the stable DynamoDB key encoding for each object class.
+fn object_class_key(class: ObjectClass) -> &'static str {
+    match class {
+        ObjectClass::RawInput => "raw",
+        ObjectClass::Artifact => "artifact",
+        ObjectClass::SanitizedHistory => "history",
+    }
+}
+
+/// Produce the partition key and sort key for object metadata.
+/// The sort key embeds the object class and stable identifier.
+pub fn object_metadata(
+    workflow_id: &WorkflowId,
+    class: ObjectClass,
+    object_id: &StorageRecordId,
+) -> Result<(String, String), KeyError> {
+    let pk = format!("WF#{}", workflow_id);
+    let sk = format!("OBJECT#{}#{}", object_class_key(class), object_id.as_str());
+    validate_key_component("object pk", &pk, MAX_PARTITION_KEY_LENGTH)?;
+    validate_key_component("object sk", &sk, MAX_SORT_KEY_LENGTH)?;
+    Ok((pk, sk))
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::expect_used)]
@@ -278,5 +318,78 @@ mod tests {
                     .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
             );
         }
+    }
+
+    #[test]
+    fn history_pointer_key_uses_zero_padded_20_digit_sequence() {
+        use application::repositories::HistorySequence;
+        let id = WorkflowId::new("workflow-17").expect("valid workflow id");
+        let (pk, sk) =
+            history_pointer(&id, HistorySequence::new(9)).expect("history key should be valid");
+        assert_eq!(pk, "WF#workflow-17");
+        assert_eq!(sk, "HISTORY#00000000000000000009");
+    }
+
+    #[test]
+    fn history_pointer_key_respects_storage_key_cases_fixture() {
+        use application::repositories::HistorySequence;
+        let id = WorkflowId::new("workflow-17").expect("valid workflow id");
+        let (pk, sk) =
+            history_pointer(&id, HistorySequence::new(9)).expect("history key should be valid");
+        assert_eq!(pk, "WF#workflow-17");
+        assert_eq!(sk, "HISTORY#00000000000000000009");
+    }
+
+    #[test]
+    fn history_sequence_zero_padding_ensures_lexical_sort_order() {
+        use application::repositories::HistorySequence;
+        let id = WorkflowId::new("wf").expect("valid");
+        let small = history_pointer(&id, HistorySequence::new(1)).expect("valid");
+        let large = history_pointer(&id, HistorySequence::new(10)).expect("valid");
+        let huge = history_pointer(&id, HistorySequence::new(100)).expect("valid");
+        assert!(small.1 < large.1);
+        assert!(large.1 < huge.1);
+        assert_eq!(small.1, "HISTORY#00000000000000000001");
+        assert_eq!(large.1, "HISTORY#00000000000000000010");
+        assert_eq!(huge.1, "HISTORY#00000000000000000100");
+    }
+
+    #[test]
+    fn object_metadata_key_encodes_class_and_id() {
+        use application::ports::{ObjectClass, StorageRecordId};
+        let id = WorkflowId::new("workflow-17").expect("valid workflow id");
+        let oid = StorageRecordId::new("attachment-9").expect("valid record id");
+        let (pk, sk) =
+            object_metadata(&id, ObjectClass::RawInput, &oid).expect("object key should be valid");
+        assert_eq!(pk, "WF#workflow-17");
+        assert_eq!(sk, "OBJECT#raw#attachment-9");
+    }
+
+    #[test]
+    fn object_metadata_key_respects_storage_key_cases_fixture() {
+        use application::ports::{ObjectClass, StorageRecordId};
+        let id = WorkflowId::new("workflow-17").expect("valid workflow id");
+        let oid = StorageRecordId::new("attachment-9").expect("valid record id");
+        let (pk, sk) =
+            object_metadata(&id, ObjectClass::RawInput, &oid).expect("object key should be valid");
+        assert_eq!(pk, "WF#workflow-17");
+        assert_eq!(sk, "OBJECT#raw#attachment-9");
+    }
+
+    #[test]
+    fn object_metadata_preserves_all_class_encodings() {
+        use application::ports::{ObjectClass, StorageRecordId};
+        let id = WorkflowId::new("wf").expect("valid");
+        let oid = StorageRecordId::new("obj-1").expect("valid");
+
+        let (_, raw_sk) = object_metadata(&id, ObjectClass::RawInput, &oid).expect("valid");
+        assert_eq!(raw_sk, "OBJECT#raw#obj-1");
+
+        let (_, artifact_sk) = object_metadata(&id, ObjectClass::Artifact, &oid).expect("valid");
+        assert_eq!(artifact_sk, "OBJECT#artifact#obj-1");
+
+        let (_, history_sk) =
+            object_metadata(&id, ObjectClass::SanitizedHistory, &oid).expect("valid");
+        assert_eq!(history_sk, "OBJECT#history#obj-1");
     }
 }

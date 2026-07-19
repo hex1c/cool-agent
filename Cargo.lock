@@ -1796,6 +1796,7 @@ version = "0.1.0"
 dependencies = [
  "application",
  "aws-sdk-dynamodb",
+ "base64",
  "domain",
  "serde",
  "serde_json",
