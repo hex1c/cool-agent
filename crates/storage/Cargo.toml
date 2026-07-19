@@ -26,6 +26,7 @@ regex = "1.13"
 uuid = { version = "1.23", features = ["v4"] }
 
 [dev-dependencies]
+application = { path = "../application", features = ["testing"] }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 
 [lints]

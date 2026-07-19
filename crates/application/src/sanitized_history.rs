@@ -257,7 +257,9 @@ impl SanitizedHistory {
 
     /// Construct a `SanitizedHistory` for cross-crate integration tests.
     /// This bypasses the `HistorySanitizer` provenance check and should
-    /// only be used in test code.
+    /// only be used in test code. Gated behind the `testing` feature so
+    /// it is unavailable in production builds.
+    #[cfg(feature = "testing")]
     #[doc(hidden)]
     pub fn for_testing(
         raw_messages: Vec<(SanitizedRole, String)>,
