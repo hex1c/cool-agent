@@ -19,6 +19,10 @@ fn default_config() -> NormalizationConfig {
         max_pdf_pages: 10,
         max_decompressed_bytes: 1_000_000,
         max_normalized_text_bytes: 10_000,
+        max_csv_rows: 10_000,
+        max_csv_cells: 100_000,
+        max_office_uncompressed_bytes: 52_428_800,
+        max_compression_ratio: 100,
     }
 }
 

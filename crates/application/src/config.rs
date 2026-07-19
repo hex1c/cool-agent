@@ -117,6 +117,14 @@ pub struct NormalizationConfig {
     pub max_pdf_pages: u32,
     pub max_decompressed_bytes: u64,
     pub max_normalized_text_bytes: u64,
+    #[serde(rename = "maxCsvRows")]
+    pub max_csv_rows: u32,
+    #[serde(rename = "maxCsvCells")]
+    pub max_csv_cells: u64,
+    #[serde(rename = "maxOfficeUncompressedBytes")]
+    pub max_office_uncompressed_bytes: u64,
+    #[serde(rename = "maxCompressionRatio")]
+    pub max_compression_ratio: u64,
 }
 
 impl Default for NormalizationConfig {
@@ -128,6 +136,10 @@ impl Default for NormalizationConfig {
             max_pdf_pages: 50,
             max_decompressed_bytes: 52_428_800,
             max_normalized_text_bytes: 65_536,
+            max_csv_rows: 10_000,
+            max_csv_cells: 100_000,
+            max_office_uncompressed_bytes: 52_428_800,
+            max_compression_ratio: 100,
         }
     }
 }

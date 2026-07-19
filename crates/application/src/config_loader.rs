@@ -235,6 +235,30 @@ fn validate_normalization(config: &crate::config::NormalizationConfig) -> Result
             reason: "must be non-zero".to_owned(),
         });
     }
+    if config.max_csv_rows == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: "normalization.maxCsvRows".to_owned(),
+            reason: "must be non-zero".to_owned(),
+        });
+    }
+    if config.max_csv_cells == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: "normalization.maxCsvCells".to_owned(),
+            reason: "must be non-zero".to_owned(),
+        });
+    }
+    if config.max_office_uncompressed_bytes == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: "normalization.maxOfficeUncompressedBytes".to_owned(),
+            reason: "must be non-zero".to_owned(),
+        });
+    }
+    if config.max_compression_ratio == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: "normalization.maxCompressionRatio".to_owned(),
+            reason: "must be non-zero".to_owned(),
+        });
+    }
     Ok(())
 }
 

@@ -1,9 +1,11 @@
 # Document test fixtures
 
-All byte fixtures for image/PDF normalization tests are constructed inline in
-the test source files (`crates/application/tests/image_pdf_security.rs` and
-unit tests within the normalization modules). No external binary fixtures are
-committed to this directory.
+All byte fixtures for image, PDF, CSV, and Office normalization tests are constructed inline in
+the test source files (`crates/application/tests/image_pdf_security.rs`,
+`crates/application/tests/office_security.rs`, and unit tests within the
+normalization modules). No external binary fixtures are committed to this
+directory. `office-cases.json` is a human-readable catalogue of the inline
+Office/CSV cases, not a binary fixture.
 
 ## Why inline fixtures?
 
@@ -23,5 +25,6 @@ test file; do not drop binary files here unless explicitly approved.
 ## Task mapping
 
 | Task | Test file | What it covers |
-|------|-----------|---------------|
+| ------ | ----------- | --------------- |
 | 27 | `crates/application/tests/image_pdf_security.rs` | JPEG/PNG sniffing, dimension parsing, pixel limits, PDF page counting, encryption rejection, decompression bomb detection |
+| 28 | `crates/application/tests/office_security.rs` | CSV dialect/encoding/row/cell limits, OOXML ZIP-header macro/encrypted/bomb screening, legacy `.doc`/`.xls` rejection, macro-enabled MIME rejection |

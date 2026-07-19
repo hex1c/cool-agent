@@ -132,7 +132,11 @@
                   "maxImagePixels",
                   "maxPdfPages",
                   "maxDecompressedBytes",
-                  "maxNormalizedTextBytes"
+                  "maxNormalizedTextBytes",
+                  "maxCsvRows",
+                  "maxCsvCells",
+                  "maxOfficeUncompressedBytes",
+                  "maxCompressionRatio"
                 ]
               }
             }
@@ -277,7 +281,11 @@
         "maxImagePixels": { "type": "integer", "minimum": 1 },
         "maxPdfPages": { "type": "integer", "minimum": 1, "maximum": 1000 },
         "maxDecompressedBytes": { "type": "integer", "minimum": 1 },
-        "maxNormalizedTextBytes": { "type": "integer", "minimum": 1 }
+        "maxNormalizedTextBytes": { "type": "integer", "minimum": 1 },
+        "maxCsvRows": { "type": "integer", "minimum": 1 },
+        "maxCsvCells": { "type": "integer", "minimum": 1 },
+        "maxOfficeUncompressedBytes": { "type": "integer", "minimum": 1 },
+        "maxCompressionRatio": { "type": "integer", "minimum": 1 }
       }
     },
     "timeouts": {
