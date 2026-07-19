@@ -5,9 +5,9 @@ import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
  * `AiRequest.model` contract: a provider, model id, and prompt version.
  */
 export interface ModelSpec {
-  readonly provider: string;
-  readonly modelId: string;
-  readonly promptVersion: string;
+	readonly provider: string;
+	readonly modelId: string;
+	readonly promptVersion: string;
 }
 
 /**
@@ -21,15 +21,15 @@ export type ResolvedModel = NonNullable<ReturnType<ModelRuntime["getModel"]>>;
  * model runtime's catalog. Fail closed — never fall back to an arbitrary model.
  */
 export class ModelResolutionError extends Error {
-  public readonly provider: string;
-  public readonly modelId: string;
+	public readonly provider: string;
+	public readonly modelId: string;
 
-  public constructor(provider: string, modelId: string) {
-    super(`AI model not registered: ${provider}/${modelId}`);
-    this.name = "ModelResolutionError";
-    this.provider = provider;
-    this.modelId = modelId;
-  }
+	public constructor(provider: string, modelId: string) {
+		super(`AI model not registered: ${provider}/${modelId}`);
+		this.name = "ModelResolutionError";
+		this.provider = provider;
+		this.modelId = modelId;
+	}
 }
 
 /**
@@ -41,12 +41,12 @@ export class ModelResolutionError extends Error {
  * `models.json`). An unknown model is rejected.
  */
 export function resolveModel(
-  runtime: ModelRuntime,
-  spec: ModelSpec,
+	runtime: ModelRuntime,
+	spec: ModelSpec,
 ): ResolvedModel {
-  const model = runtime.getModel(spec.provider, spec.modelId);
-  if (!model) {
-    throw new ModelResolutionError(spec.provider, spec.modelId);
-  }
-  return model;
+	const model = runtime.getModel(spec.provider, spec.modelId);
+	if (!model) {
+		throw new ModelResolutionError(spec.provider, spec.modelId);
+	}
+	return model;
 }
