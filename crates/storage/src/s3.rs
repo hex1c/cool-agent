@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
 use application::ports::{
-    ArtifactLinkSigner, ObjectClass, ObjectStore, PresignedObjectLink, StoredObject,
+    ArtifactLinkSigner, HistoryStore, ObjectClass, ObjectStore, PresignedObjectLink, StoredObject,
 };
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
@@ -39,6 +39,8 @@ pub enum S3ValidationError {
         maximum: usize,
     },
     BucketNameInvalidCharacters,
+    HistoryClassRejected,
+    NonHistoryClassRejected,
     ByteLimitZero {
         class: &'static str,
     },
@@ -80,6 +82,12 @@ impl Display for S3ValidationError {
             }
             Self::BucketNameInvalidCharacters => {
                 f.write_str("bucket name contains invalid characters")
+            }
+            Self::HistoryClassRejected => {
+                f.write_str("SanitizedHistory must be stored through HistoryStore")
+            }
+            Self::NonHistoryClassRejected => {
+                f.write_str("only SanitizedHistory can be stored through HistoryStore")
             }
             Self::ByteLimitZero { class } => {
                 write!(f, "{class} byte limit must be positive")
@@ -593,6 +601,12 @@ impl ObjectStore for S3ObjectStore {
     async fn put(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error> {
         validate_object(object)?;
 
+        // Reject SanitizedHistory — it must go through HistoryStore to
+        // enforce producer-owned redaction.
+        if object.class == ObjectClass::SanitizedHistory {
+            return Err(S3ValidationError::HistoryClassRejected.into());
+        }
+
         let (limit, class_name) = self.class_limit(object.class);
         let body_len = bytes.len() as u64;
         if body_len > limit {
@@ -698,6 +712,73 @@ impl ObjectStore for S3ObjectStore {
         }
 
         Ok(body_bytes.to_vec())
+    }
+}
+
+// ── HistoryStore impl ─────────────────────────────────────────────
+
+impl HistoryStore for S3ObjectStore {
+    type Error = S3Error;
+
+    async fn put_history(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error> {
+        validate_object(object)?;
+
+        // Only SanitizedHistory is accepted through this typed path.
+        if object.class != ObjectClass::SanitizedHistory {
+            return Err(S3ValidationError::NonHistoryClassRejected.into());
+        }
+
+        let (limit, class_name) = self.class_limit(object.class);
+        let body_len = bytes.len() as u64;
+        if body_len > limit {
+            return Err(S3ValidationError::ClassLimitExceeded {
+                class: class_name,
+                limit,
+                actual: body_len,
+            }
+            .into());
+        }
+
+        check_length_and_hash(bytes, object.byte_length, &object.sha256)?;
+
+        if object.media_type != "application/json" {
+            return Err(S3ValidationError::NotJsonMediaType.into());
+        }
+        validate_sanitized_history(bytes, limit)?;
+
+        self.client
+            .put_object()
+            .bucket(&self.bucket)
+            .key(object.storage_key.as_str())
+            .body(ByteStream::from(bytes.to_vec()))
+            .if_none_match("*")
+            .server_side_encryption(ServerSideEncryption::Aes256)
+            .content_type(&object.media_type)
+            .metadata("workflow-id", object.workflow_id.as_str())
+            .metadata("object-id", object.object_id.as_str())
+            .metadata("object-class", object_class_metadata(object.class))
+            .metadata("sha256", sha256_to_hex(&object.sha256))
+            .metadata("byte-length", object.byte_length.to_string())
+            .send()
+            .await
+            .map_err(|_| S3Error::Service {
+                operation: "put history object",
+            })?;
+
+        Ok(())
+    }
+
+    async fn get_history(&self, object: &StoredObject) -> Result<Vec<u8>, Self::Error> {
+        validate_object(object)?;
+
+        if object.class != ObjectClass::SanitizedHistory {
+            return Err(S3ValidationError::NonHistoryClassRejected.into());
+        }
+
+        // Delegate to the same read path as ObjectStore::get, which
+        // re-verifies length, SHA-256, media type, and sanitized-history
+        // schema before returning.
+        ObjectStore::get(self, object).await
     }
 }
 
@@ -927,8 +1008,14 @@ mod tests {
             "application/json",
             unsafe_history,
         );
+        // SanitizedHistory must go through HistoryStore::put_history, not
+        // ObjectStore::put.
         assert!(matches!(
             store.put(&history, unsafe_history).await,
+            Err(S3Error::Validation(S3ValidationError::HistoryClassRejected))
+        ));
+        assert!(matches!(
+            store.put_history(&history, unsafe_history).await,
             Err(S3Error::Validation(S3ValidationError::CredentialKeyPresent))
         ));
     }

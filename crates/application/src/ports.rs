@@ -250,6 +250,10 @@ impl Drop for PresignedObjectLink {
 pub trait ObjectStore {
     type Error: Display;
 
+    /// Store a raw-input or artifact object. Implementations **must** reject
+    /// `ObjectClass::SanitizedHistory` — history must be published through
+    /// the typed `HistoryStore` capability to enforce producer-owned
+    /// redaction.
     async fn put(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error>;
     /// Retrieve an object's bytes. Implementations **must** re-verify the
     /// content against `object.byte_length` and `object.sha256` before
@@ -257,6 +261,23 @@ pub trait ObjectStore {
     /// relied upon by the publication coordinator's ambiguous-put
     /// disambiguation path.
     async fn get(&self, object: &StoredObject) -> Result<Vec<u8>, Self::Error>;
+}
+
+/// Typed history storage capability. Separated from `ObjectStore` so that
+/// raw `put` cannot be used to bypass producer-owned `SanitizedHistory`
+/// redaction. Implementations **must** reject any class other than
+/// `ObjectClass::SanitizedHistory`.
+#[allow(async_fn_in_trait)]
+pub trait HistoryStore {
+    type Error: Display;
+
+    /// Store a sanitized-history object body. The caller (publication
+    /// coordinator) is responsible for proving the bytes originated from a
+    /// `SanitizedHistory` value.
+    async fn put_history(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error>;
+    /// Retrieve a sanitized-history object's bytes with hash/length
+    /// re-verification, as per `ObjectStore::get`.
+    async fn get_history(&self, object: &StoredObject) -> Result<Vec<u8>, Self::Error>;
 }
 
 /// Capability for generating short-lived artifact retrieval links. The expiry

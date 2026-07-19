@@ -1,8 +1,8 @@
 #![cfg(feature = "integration")]
 
 use application::ports::{
-    ArtifactLinkSigner, ObjectClass, ObjectStore, SecretProvider, SecretReference, StorageKey,
-    StorageRecordId, StoredObject,
+    ArtifactLinkSigner, HistoryStore, ObjectClass, ObjectStore, SecretProvider, SecretReference,
+    StorageKey, StorageRecordId, StoredObject,
 };
 use aws_sdk_s3::config::{Credentials as S3Credentials, Region as S3Region};
 use aws_sdk_ssm::config::{Credentials as SsmCredentials, Region as SsmRegion};
@@ -145,8 +145,8 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
         "application/json",
         history_bytes,
     )?;
-    store.put(&history, history_bytes).await?;
-    assert_eq!(store.get(&history).await?, history_bytes);
+    store.put_history(&history, history_bytes).await?;
+    assert_eq!(store.get_history(&history).await?, history_bytes);
 
     let unsafe_history_bytes = br#"{"refreshToken":"must-not-persist"}"#;
     let unsafe_history = object(
@@ -158,7 +158,9 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
         unsafe_history_bytes,
     )?;
     assert!(matches!(
-        store.put(&unsafe_history, unsafe_history_bytes).await,
+        store
+            .put_history(&unsafe_history, unsafe_history_bytes)
+            .await,
         Err(S3Error::Validation(S3ValidationError::CredentialKeyPresent))
     ));
 

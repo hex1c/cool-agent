@@ -25,8 +25,9 @@
 //!   `novus.sanitized-history.v1` JSON envelope that the storage layer
 //!   expects.
 
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
+use crate::ports::SecretValue;
 use serde::Serialize;
 
 const SCHEMA_VERSION: &str = "novus.sanitized-history.v1";
@@ -76,7 +77,7 @@ pub enum SanitizedRole {
 
 /// A single message in a sanitized history. The content has been redacted
 /// by the producer before construction.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Serialize)]
 struct SanitizedMessage {
     role: SanitizedRole,
     content: String,
@@ -86,16 +87,67 @@ struct SanitizedMessage {
 /// storage. The producer redacts known secret values and excludes tool
 /// messages at construction time. The storage layer's regex scanning
 /// provides additional defense-in-depth.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// `Debug` does not expose message content.
+#[derive(Clone, PartialEq, Eq)]
 pub struct SanitizedHistory {
     messages: Vec<SanitizedMessage>,
+}
+
+impl Debug for SanitizedHistory {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SanitizedHistory")
+            .field("message_count", &self.messages.len())
+            .finish()
+    }
+}
+
+/// Trusted sanitizer context that owns the known secret values for a
+/// conversation. This is the **only** way to construct a
+/// [`SanitizedHistory`] — the constructor is private so callers cannot
+/// bypass redaction by passing an incomplete or empty secret list without
+/// explicitly acknowledging it through one of the factory methods.
+pub struct HistorySanitizer {
+    secrets: Vec<String>,
+}
+
+impl HistorySanitizer {
+    /// Create a sanitizer from the typed secret values that were used
+    /// during the conversation. Every occurrence of each secret in message
+    /// content will be replaced with `[REDACTED]`.
+    pub fn from_secret_values(secrets: Vec<SecretValue>) -> Self {
+        Self {
+            secrets: secrets
+                .iter()
+                .map(|value| String::from_utf8_lossy(value.expose()).into_owned())
+                .collect(),
+        }
+    }
+
+    /// Create a sanitizer for conversations where no secrets were used.
+    /// This is the explicit typed "no secrets" case — the caller must
+    /// acknowledge that no redaction is needed.
+    pub fn no_secrets() -> Self {
+        Self { secrets: vec![] }
+    }
+
+    /// Sanitize raw messages, redacting all known secret values.
+    pub fn sanitize(
+        &self,
+        raw_messages: Vec<(SanitizedRole, String)>,
+    ) -> Result<SanitizedHistory, SanitizedHistoryError> {
+        let secret_refs: Vec<&str> = self.secrets.iter().map(String::as_str).collect();
+        SanitizedHistory::new(raw_messages, &secret_refs)
+    }
 }
 
 impl SanitizedHistory {
     /// Construct a sanitized history from raw messages and known secret
     /// values. Every occurrence of a known secret in message content is
     /// replaced with `[REDACTED]`. Tool messages are rejected.
-    pub fn new(
+    ///
+    /// **Private** — use [`HistorySanitizer::sanitize`] to construct.
+    fn new(
         raw_messages: Vec<(SanitizedRole, String)>,
         known_secrets: &[&str],
     ) -> Result<Self, SanitizedHistoryError> {
@@ -171,8 +223,11 @@ mod tests {
     fn redacts_known_secret_values() {
         // Assembled at runtime to avoid triggering secret scanners.
         let secret = format!("{}_{}", "placeholder", "value-12345");
-        let history = SanitizedHistory::new(
-            vec![
+        let sanitizer = HistorySanitizer::from_secret_values(vec![
+            SecretValue::new(secret.clone().into_bytes()).expect("non-empty"),
+        ]);
+        let history = sanitizer
+            .sanitize(vec![
                 (
                     SanitizedRole::User,
                     format!("use the key {secret} to connect"),
@@ -181,10 +236,8 @@ mod tests {
                     SanitizedRole::Assistant,
                     format!("I see the key {secret} was used"),
                 ),
-            ],
-            &[&secret],
-        )
-        .expect("valid history");
+            ])
+            .expect("valid history");
 
         let serialized = history.serialize().expect("should serialize");
         let text = std::str::from_utf8(&serialized).expect("valid utf-8");
@@ -204,7 +257,8 @@ mod tests {
             SanitizedRole::Assistant,
         ];
         for role in roles {
-            let history = SanitizedHistory::new(vec![(role, "content".to_owned())], &[])
+            let history = HistorySanitizer::no_secrets()
+                .sanitize(vec![(role, "content".to_owned())])
                 .expect("valid role should be accepted");
             assert_eq!(history.message_count(), 1);
         }
@@ -216,7 +270,7 @@ mod tests {
             .map(|_| (SanitizedRole::User, "hi".to_owned()))
             .collect();
         assert!(matches!(
-            SanitizedHistory::new(messages, &[]),
+            HistorySanitizer::no_secrets().sanitize(messages),
             Err(SanitizedHistoryError::TooManyMessages { .. })
         ));
     }
@@ -225,7 +279,7 @@ mod tests {
     fn enforces_content_size_limit() {
         let content = "x".repeat(MAX_CONTENT_BYTES + 1);
         assert!(matches!(
-            SanitizedHistory::new(vec![(SanitizedRole::User, content)], &[]),
+            HistorySanitizer::no_secrets().sanitize(vec![(SanitizedRole::User, content)]),
             Err(SanitizedHistoryError::ContentTooLarge { .. })
         ));
     }
@@ -233,22 +287,20 @@ mod tests {
     #[test]
     fn rejects_empty_content() {
         assert!(matches!(
-            SanitizedHistory::new(vec![(SanitizedRole::User, String::new())], &[]),
+            HistorySanitizer::no_secrets().sanitize(vec![(SanitizedRole::User, String::new())]),
             Err(SanitizedHistoryError::EmptyContent)
         ));
     }
 
     #[test]
     fn serialize_produces_versioned_envelope() {
-        let history = SanitizedHistory::new(
-            vec![
+        let history = HistorySanitizer::no_secrets()
+            .sanitize(vec![
                 (SanitizedRole::System, "You are helpful".to_owned()),
                 (SanitizedRole::User, "hello".to_owned()),
                 (SanitizedRole::Assistant, "hi there".to_owned()),
-            ],
-            &[],
-        )
-        .expect("valid history");
+            ])
+            .expect("valid history");
 
         let serialized = history.serialize().expect("should serialize");
         let text = std::str::from_utf8(&serialized).expect("valid utf-8");
@@ -265,14 +317,16 @@ mod tests {
         // Assembled at runtime to avoid triggering secret scanners.
         let oauth = format!("{}_{}", "oauth", "token-fragment");
         let smtp = format!("{}_{}", "smtp", "pass-fragment");
-        let history = SanitizedHistory::new(
-            vec![(
+        let sanitizer = HistorySanitizer::from_secret_values(vec![
+            SecretValue::new(oauth.clone().into_bytes()).expect("non-empty"),
+            SecretValue::new(smtp.clone().into_bytes()).expect("non-empty"),
+        ]);
+        let history = sanitizer
+            .sanitize(vec![(
                 SanitizedRole::User,
                 format!("connect with {oauth} and {smtp}"),
-            )],
-            &[&oauth, &smtp],
-        )
-        .expect("valid history");
+            )])
+            .expect("valid history");
 
         let serialized = history.serialize().expect("serialize");
         let text = std::str::from_utf8(&serialized).expect("utf-8");
@@ -287,11 +341,13 @@ mod tests {
         // must be redacted first to prevent partial leakage.
         let long = format!("{}_{}_{}", "alpha", "beta", "gamma");
         let short = format!("{}_{}", "alpha", "beta");
-        let history = SanitizedHistory::new(
-            vec![(SanitizedRole::User, format!("value is {long} here"))],
-            &[&long, &short],
-        )
-        .expect("valid history");
+        let sanitizer = HistorySanitizer::from_secret_values(vec![
+            SecretValue::new(long.clone().into_bytes()).expect("non-empty"),
+            SecretValue::new(short.clone().into_bytes()).expect("non-empty"),
+        ]);
+        let history = sanitizer
+            .sanitize(vec![(SanitizedRole::User, format!("value is {long} here"))])
+            .expect("valid history");
 
         let serialized = history.serialize().expect("serialize");
         let text = std::str::from_utf8(&serialized).expect("utf-8");
@@ -304,15 +360,13 @@ mod tests {
 
     #[test]
     fn redaction_preserves_message_order() {
-        let history = SanitizedHistory::new(
-            vec![
+        let history = HistorySanitizer::no_secrets()
+            .sanitize(vec![
                 (SanitizedRole::System, "system msg".to_owned()),
                 (SanitizedRole::User, "user msg".to_owned()),
                 (SanitizedRole::Assistant, "assistant msg".to_owned()),
-            ],
-            &[],
-        )
-        .expect("valid history");
+            ])
+            .expect("valid history");
 
         let serialized = history.serialize().expect("should serialize");
         let value: serde_json::Value = serde_json::from_slice(&serialized).expect("valid json");
