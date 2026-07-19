@@ -424,6 +424,17 @@ static CREDENTIAL_PATTERNS: LazyLock<Vec<regex::Regex>> = LazyLock::new(|| {
         // Stripe key: sk_live_ or rk_live_ followed by alphanumeric
         // characters.
         regex::Regex::new(r"(?:sk|rk)_live_[0-9A-Za-z]{10,}").expect("valid regex: stripe key"),
+        // OpenAI API key: sk-proj- or sk- followed by a long base62/base64url
+        // string.
+        regex::Regex::new(r"sk-proj-[A-Za-z0-9_-]{20,}").expect("valid regex: openai proj key"),
+        regex::Regex::new(r"sk-[A-Za-z0-9]{48}").expect("valid regex: openai legacy key"),
+        // Anthropic API key: sk-ant-api03- followed by a long string.
+        regex::Regex::new(r"sk-ant-api0[0-9]-[A-Za-z0-9_-]{20,}")
+            .expect("valid regex: anthropic key"),
+        // GitHub fine-grained PAT: github_pat_ followed by base62.
+        regex::Regex::new(r"github_pat_[A-Za-z0-9_]{22,}").expect("valid regex: github pat"),
+        // npm token: npm_ followed by 36 base62 characters.
+        regex::Regex::new(r"npm_[A-Za-z0-9]{36}").expect("valid regex: npm token"),
     ]
 });
 
@@ -1069,6 +1080,40 @@ mod tests {
         )
         .into_bytes();
         let body: &[u8] = &body;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // OpenAI project key
+        let openai = concat!("sk-proj-", "1234567890abcdefghijklmnopQRSTuvwxyz_-");
+        let body = format!(
+            r#"{{"schemaVersion":"novus.sanitized-history.v1","messages":[{{"role":"user","content":"{}"}}]}}"#,
+            openai,
+        )
+        .into_bytes();
+        let body: &[u8] = &body;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // Anthropic API key
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"sk-ant-api03-1234567890abcdefghijklmnopQRSTuv"}]}"#;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // GitHub fine-grained PAT
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"github_pat_1234567890abcdefABCDEFGH"}]}"#;
+        assert!(matches!(
+            validate_sanitized_history(body, 10_000),
+            Err(S3ValidationError::CredentialValueMarker)
+        ));
+
+        // npm token
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"npm_1234567890abcdefghijklmnopqrstuvwxyzABCD"}]}"#;
         assert!(matches!(
             validate_sanitized_history(body, 10_000),
             Err(S3ValidationError::CredentialValueMarker)

@@ -123,6 +123,7 @@ impl DynamoDbStore {
         &self,
         pk: &str,
         sk: &str,
+        expected_workflow_id: &WorkflowId,
         expected: &StoredObjectMetadata,
     ) -> Result<ConditionalWriteOutcome, StorageError> {
         let output = self
@@ -142,14 +143,40 @@ impl DynamoDbStore {
             entity: "object metadata",
         })?;
 
-        let entity = required_string_attribute(&item, "object metadata", "entity")?;
+        // Every mismatch during conflict verification — including
+        // missing attributes, wrong entity, wrong workflow_id, and
+        // malformed payloads — must map to ConflictDifferent, not
+        // CorruptItem or Deserialization.
+        let entity =
+            required_string_attribute(&item, "object metadata", "entity").map_err(|_| {
+                StorageError::ConflictDifferent {
+                    entity: "object metadata",
+                }
+            })?;
         if entity != "object_metadata" {
             return Err(StorageError::ConflictDifferent {
                 entity: "object metadata",
             });
         }
-        let payload = required_string_attribute(&item, "object metadata", "payload")?;
-        let stored: StoredObjectMetadata = deserialize_payload("object metadata", payload)?;
+        let stored_workflow_id = required_string_attribute(&item, "object metadata", "workflow_id")
+            .map_err(|_| StorageError::ConflictDifferent {
+                entity: "object metadata",
+            })?;
+        if stored_workflow_id != expected_workflow_id.as_str() {
+            return Err(StorageError::ConflictDifferent {
+                entity: "object metadata",
+            });
+        }
+        let payload =
+            required_string_attribute(&item, "object metadata", "payload").map_err(|_| {
+                StorageError::ConflictDifferent {
+                    entity: "object metadata",
+                }
+            })?;
+        let stored: StoredObjectMetadata = deserialize_payload("object metadata", payload)
+            .map_err(|_| StorageError::ConflictDifferent {
+                entity: "object metadata",
+            })?;
         if stored == *expected {
             Ok(ConditionalWriteOutcome::Committed)
         } else {
@@ -204,8 +231,13 @@ impl ObjectMetadataRepository for DynamoDbStore {
                 // key. Prove it is the same immutable object via a strongly
                 // consistent read; if the payload differs, this is a
                 // corruption/collision, not an idempotent retry.
-                self.verify_object_conflict(&pk_for_conflict, &sk_for_conflict, &stored)
-                    .await
+                self.verify_object_conflict(
+                    &pk_for_conflict,
+                    &sk_for_conflict,
+                    &object.workflow_id,
+                    &stored,
+                )
+                .await
             }
             Err(_) => Err(StorageError::Service {
                 operation: "record object metadata",

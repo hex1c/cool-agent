@@ -139,6 +139,7 @@ impl DynamoDbStore {
         &self,
         pk: &str,
         sk: &str,
+        expected_workflow_id: &WorkflowId,
         expected: &StoredHistoryPointer,
     ) -> Result<ConditionalWriteOutcome, StorageError> {
         let output = self
@@ -158,14 +159,39 @@ impl DynamoDbStore {
             entity: "history pointer",
         })?;
 
-        let entity = required_string_attribute(&item, "history pointer", "entity")?;
+        // Every mismatch during conflict verification — including
+        // missing attributes, wrong entity, wrong workflow_id, and
+        // malformed payloads — must map to ConflictDifferent.
+        let entity =
+            required_string_attribute(&item, "history pointer", "entity").map_err(|_| {
+                StorageError::ConflictDifferent {
+                    entity: "history pointer",
+                }
+            })?;
         if entity != "history_pointer" {
             return Err(StorageError::ConflictDifferent {
                 entity: "history pointer",
             });
         }
-        let payload = required_string_attribute(&item, "history pointer", "payload")?;
-        let stored: StoredHistoryPointer = deserialize_payload("history pointer", payload)?;
+        let stored_workflow_id = required_string_attribute(&item, "history pointer", "workflow_id")
+            .map_err(|_| StorageError::ConflictDifferent {
+                entity: "history pointer",
+            })?;
+        if stored_workflow_id != expected_workflow_id.as_str() {
+            return Err(StorageError::ConflictDifferent {
+                entity: "history pointer",
+            });
+        }
+        let payload =
+            required_string_attribute(&item, "history pointer", "payload").map_err(|_| {
+                StorageError::ConflictDifferent {
+                    entity: "history pointer",
+                }
+            })?;
+        let stored: StoredHistoryPointer = deserialize_payload("history pointer", payload)
+            .map_err(|_| StorageError::ConflictDifferent {
+                entity: "history pointer",
+            })?;
         if stored == *expected {
             Ok(ConditionalWriteOutcome::Committed)
         } else {
@@ -224,8 +250,13 @@ impl HistoryRepository for DynamoDbStore {
                 // key. Prove it is the same immutable checkpoint via a
                 // strongly consistent read; if the payload differs, this
                 // is a corruption/collision, not an idempotent retry.
-                self.verify_history_conflict(&pk_for_conflict, &sk_for_conflict, &stored)
-                    .await
+                self.verify_history_conflict(
+                    &pk_for_conflict,
+                    &sk_for_conflict,
+                    &checkpoint.workflow_id,
+                    &stored,
+                )
+                .await
             }
             Err(_) => Err(StorageError::Service {
                 operation: "append history pointer",
