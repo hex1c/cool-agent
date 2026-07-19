@@ -29,6 +29,7 @@ use std::fmt::{Debug, Display, Formatter};
 
 use crate::ports::SecretValue;
 use serde::Serialize;
+use zeroize::Zeroizing;
 
 const SCHEMA_VERSION: &str = "novus.sanitized-history.v1";
 const MAX_MESSAGES: usize = 200;
@@ -120,12 +121,12 @@ impl NoSecretsUsed {
     /// Explicitly attest that no secrets were used. This is `pub(crate)`
     /// so only trusted application-crate code can produce this attestation;
     /// external callers must obtain it from a trusted operation context.
-    /// Explicitly attest that no secrets were used. The caller takes
-    /// responsibility for verifying this claim. This should only be
-    /// called from trusted operation-context code that has verified
-    /// no secret values appear in the message content.
+    /// Explicitly attest that no secrets were used. This is `pub(crate)`
+    /// so only trusted application-crate code can produce this attestation;
+    /// external callers must obtain it from a trusted operation context.
+    #[cfg(test)]
     #[allow(dead_code)]
-    pub const fn attest() -> Self {
+    pub(crate) const fn attest() -> Self {
         Self { _private: () }
     }
 }
@@ -136,22 +137,10 @@ impl NoSecretsUsed {
 /// bypass redaction by passing an incomplete or empty secret list without
 /// explicitly acknowledging it through one of the factory methods.
 ///
-/// Secret values are zeroized when the sanitizer is dropped.
+/// Secret values are zeroized when the sanitizer is dropped via
+/// `Zeroizing<String>`.
 pub struct HistorySanitizer {
-    secrets: Vec<String>,
-}
-
-impl Drop for HistorySanitizer {
-    fn drop(&mut self) {
-        for secret in &mut self.secrets {
-            // Best-effort zeroization: overwrite with zeros of the same
-            // length, then clear. This does not use unsafe code.
-            let len = secret.len();
-            secret.clear();
-            secret.push_str(&"\0".repeat(len));
-            secret.clear();
-        }
-    }
+    secrets: Vec<Zeroizing<String>>,
 }
 
 impl HistorySanitizer {
@@ -167,14 +156,14 @@ impl HistorySanitizer {
         Ok(Self {
             secrets: secrets
                 .iter()
-                .map(|value| String::from_utf8_lossy(value.expose()).into_owned())
+                .map(|value| Zeroizing::new(String::from_utf8_lossy(value.expose()).into_owned()))
                 .collect(),
         })
     }
 
     /// Create a sanitizer for conversations where no secrets were used.
-    /// Requires an explicit [`NoSecretsUsed`] attestation — the caller
-    /// must deliberately acknowledge that no redaction is needed.
+    /// Requires an explicit [`NoSecretsUsed`] attestation — only
+    /// application-crate code can produce this attestation.
     pub fn no_secrets(_attestation: NoSecretsUsed) -> Self {
         Self { secrets: vec![] }
     }
@@ -184,7 +173,7 @@ impl HistorySanitizer {
         &self,
         raw_messages: Vec<(SanitizedRole, String)>,
     ) -> Result<SanitizedHistory, SanitizedHistoryError> {
-        let secret_refs: Vec<&str> = self.secrets.iter().map(String::as_str).collect();
+        let secret_refs: Vec<&str> = self.secrets.iter().map(|s| s.as_str()).collect();
         SanitizedHistory::new(raw_messages, &secret_refs)
     }
 }

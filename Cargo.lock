@@ -44,6 +44,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "zeroize",
 ]
 
 [[package]]
