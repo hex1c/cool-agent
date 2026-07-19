@@ -152,9 +152,7 @@ impl HistorySanitizer {
     /// context code, not by constructing it directly. Rejects an empty
     /// list.
     #[allow(dead_code)]
-    pub(crate) fn from_secret_values(
-        secrets: Vec<SecretValue>,
-    ) -> Result<Self, SanitizedHistoryError> {
+    pub fn from_secret_values(secrets: Vec<SecretValue>) -> Result<Self, SanitizedHistoryError> {
         if secrets.is_empty() {
             return Err(SanitizedHistoryError::EmptySecretProvenance);
         }
@@ -253,18 +251,6 @@ impl SanitizedHistory {
 
     pub fn message_count(&self) -> usize {
         self.messages.len()
-    }
-
-    /// Construct a `SanitizedHistory` for cross-crate integration tests.
-    /// This bypasses the `HistorySanitizer` provenance check and should
-    /// only be used in test code. Gated behind the `testing` feature so
-    /// it is unavailable in production builds.
-    #[cfg(feature = "testing")]
-    #[doc(hidden)]
-    pub fn for_testing(
-        raw_messages: Vec<(SanitizedRole, String)>,
-    ) -> Result<Self, SanitizedHistoryError> {
-        Self::new(raw_messages, &[])
     }
 }
 
