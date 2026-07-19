@@ -170,6 +170,7 @@ fn validate_semantics(
         });
     }
     validate_budget(&config.budget)?;
+    validate_normalization(&config.normalization)?;
     if config.retry.max_attempts == 0 || config.retry.max_attempts > 3 {
         return Err(ConfigError::InvalidValue {
             field: "retry.maxAttempts".to_owned(),
@@ -207,6 +208,34 @@ fn validate_semantics(
         }
     }
     Ok(config.clone())
+}
+
+fn validate_normalization(config: &crate::config::NormalizationConfig) -> Result<(), ConfigError> {
+    if config.max_image_pixels == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: "normalization.maxImagePixels".to_owned(),
+            reason: "must be non-zero".to_owned(),
+        });
+    }
+    if config.max_pdf_pages == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: "normalization.maxPdfPages".to_owned(),
+            reason: "must be non-zero".to_owned(),
+        });
+    }
+    if config.max_decompressed_bytes == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: "normalization.maxDecompressedBytes".to_owned(),
+            reason: "must be non-zero".to_owned(),
+        });
+    }
+    if config.max_normalized_text_bytes == 0 {
+        return Err(ConfigError::InvalidValue {
+            field: "normalization.maxNormalizedTextBytes".to_owned(),
+            reason: "must be non-zero".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 fn validate_budget(budget: &BudgetConfig) -> Result<(), ConfigError> {
