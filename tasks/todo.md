@@ -149,12 +149,12 @@ Google-account behavior.
 **Acceptance criteria:**
 
 - [x] Exact Drive, Sheets, Docs, and Calendar scopes are recorded; Gmail is absent.
-- [ ] State replay, expiry, revocation, and refresh behavior are demonstrated.
+- [x] State replay, expiry, revocation, and refresh behavior are demonstrated.
 - [x] Test-user/verification requirements and secret-storage costs are documented.
 
 **Verification:**
 
-- [ ] Manual check: connect, refresh, revoke, and reconnect a development account.
+- [x] Manual check: connect, refresh, revoke, and reconnect a development account.
 - [x] Human approves `docs/spikes/google-oauth.md`.
 
 **Dependencies:** None; requires development Google OAuth credentials.
@@ -173,13 +173,13 @@ out, and connection-dropped sends so retries cannot duplicate email.
 
 **Acceptance criteria:**
 
-- [ ] The report records stable message identifiers and observable acceptance points.
+- [x] The report records stable message identifiers and observable acceptance points.
 - [x] Timeout cases are classified as retryable or manual-review ambiguity.
-- [ ] A safe idempotency strategy is approved.
+- [x] A safe idempotency strategy is approved.
 
 **Verification:**
 
-- [ ] Manual check: test against a non-production mailbox and verify received-message counts.
+- [x] Manual check: test against a non-production mailbox and verify received-message counts.
 - [x] Human approves `docs/spikes/hostinger-smtp.md`.
 
 **Dependencies:** None; requires development Hostinger credentials.
@@ -200,13 +200,13 @@ account ceiling.
 **Acceptance criteria:**
 
 - [x] The worksheet includes Step Functions, Lambda, API Gateway, DynamoDB, S3, Parameter Store/KMS, logs, alarms, retention growth, and safety margin.
-- [ ] An approved ADR defines isolated per-environment usage aggregation, shared-cost attribution, ownership, consistency, fail-closed behavior, and least-privilege access.
-- [ ] Warning, suspension, and deployment-block thresholds remain feasible; an unaffordable design produces a PRD change proposal.
+- [x] An approved ADR defines isolated per-environment usage aggregation, shared-cost attribution, ownership, consistency, fail-closed behavior, and least-privilege access.
+- [x] Warning, suspension, and deployment-block thresholds remain feasible; an unaffordable design produces a PRD change proposal.
 
 **Verification:**
 
-- [ ] Manual check: recalculate with PRD expected usage and worst-case attachment limits.
-- [ ] Human approves the per-environment forecasts and budget-control ADR.
+- [x] Manual check: recalculate with PRD expected usage and worst-case attachment limits.
+- [x] Human approves the per-environment forecasts and budget-control ADR.
 
 **Dependencies:** None
 
