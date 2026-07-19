@@ -2,6 +2,7 @@
 
 //! Application services and infrastructure-independent configuration.
 
+pub mod attachments;
 pub mod config;
 pub mod config_loader;
 pub mod external_operation;
