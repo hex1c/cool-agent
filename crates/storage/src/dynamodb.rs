@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
+use hmac::{Hmac, KeyInit, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 
 pub const TABLE_NAME_MIN_LENGTH: usize = 3;
 pub const TABLE_NAME_MAX_LENGTH: usize = 255;
@@ -17,6 +19,7 @@ pub enum StoreValidationError {
     TableNameTooShort { length: usize, minimum: usize },
     TableNameTooLong { length: usize, maximum: usize },
     TableNameInvalidCharacters,
+    InvalidPageTokenKey,
     Key(super::keys::KeyError),
     PayloadTooLarge { bytes: usize, maximum: usize },
     InvalidTransitionRevisions,
@@ -40,6 +43,7 @@ impl Display for StoreValidationError {
             Self::TableNameInvalidCharacters => {
                 formatter.write_str("table name contains invalid characters")
             }
+            Self::InvalidPageTokenKey => formatter.write_str("page token signing key is invalid"),
             Self::Key(error) => write!(formatter, "key error: {error:?}"),
             Self::PayloadTooLarge { bytes, maximum } => {
                 write!(formatter, "payload size {bytes} exceeds {maximum} bytes")
@@ -131,6 +135,7 @@ impl From<StoreValidationError> for StorageError {
 pub struct DynamoDbStore {
     client: aws_sdk_dynamodb::Client,
     table_name: String,
+    page_token_key: [u8; 32],
 }
 
 impl std::fmt::Debug for DynamoDbStore {
@@ -139,7 +144,14 @@ impl std::fmt::Debug for DynamoDbStore {
             .debug_struct("DynamoDbStore")
             .field("client", &"[REDACTED]")
             .field("table_name", &self.table_name)
+            .field("page_token_key", &"[REDACTED]")
             .finish()
+    }
+}
+
+impl Drop for DynamoDbStore {
+    fn drop(&mut self) {
+        self.page_token_key.fill(0);
     }
 }
 
@@ -147,10 +159,18 @@ impl DynamoDbStore {
     pub fn new(
         client: aws_sdk_dynamodb::Client,
         table_name: impl Into<String>,
+        page_token_key: [u8; 32],
     ) -> Result<Self, StoreValidationError> {
         let table_name = table_name.into();
         validate_table_name(&table_name)?;
-        Ok(Self { client, table_name })
+        if page_token_key.iter().all(|byte| *byte == 0) {
+            return Err(StoreValidationError::InvalidPageTokenKey);
+        }
+        Ok(Self {
+            client,
+            table_name,
+            page_token_key,
+        })
     }
 
     pub fn table_name(&self) -> &str {
@@ -231,59 +251,117 @@ impl std::error::Error for PageTokenError {}
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct StoredPageToken {
+    table_name: String,
+    query_family: String,
+    scan_forward: bool,
     pk: String,
     sk: String,
 }
 
-/// Encode a DynamoDB last-evaluated key into an opaque page token.
-pub fn encode_page_token(
-    last_evaluated_key: &HashMap<String, aws_sdk_dynamodb::types::AttributeValue>,
-) -> Result<String, StorageError> {
-    let pk = required_page_key(last_evaluated_key, "pk")?;
-    let sk = required_page_key(last_evaluated_key, "sk")?;
-    let bytes = serde_json::to_vec(&StoredPageToken {
-        pk: pk.to_owned(),
-        sk: sk.to_owned(),
-    })
-    .map_err(|_| StorageError::Build {
-        operation: "page token encode",
-    })?;
+type PageTokenMac = Hmac<Sha256>;
 
-    use base64::Engine;
-    Ok(base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes))
-}
+impl DynamoDbStore {
+    /// Encode a last-evaluated key into an authenticated token bound to this
+    /// table, query family, and scan direction.
+    pub(crate) fn encode_page_token(
+        &self,
+        last_evaluated_key: &HashMap<String, aws_sdk_dynamodb::types::AttributeValue>,
+        query_family: &'static str,
+        scan_forward: bool,
+    ) -> Result<String, StorageError> {
+        let pk = required_page_key(last_evaluated_key, "pk")?;
+        let sk = required_page_key(last_evaluated_key, "sk")?;
+        let payload = serde_json::to_vec(&StoredPageToken {
+            table_name: self.table_name.clone(),
+            query_family: query_family.to_owned(),
+            scan_forward,
+            pk: pk.to_owned(),
+            sk: sk.to_owned(),
+        })
+        .map_err(|_| StorageError::Build {
+            operation: "page token encode",
+        })?;
+        let tag = self.page_token_tag(&payload)?;
 
-/// Decode a page token and bind it to exactly one workflow partition and
-/// one sort-key family before returning it to DynamoDB.
-pub fn decode_page_token(
-    token: &str,
-    expected_pk: &str,
-    expected_sk_prefix: &str,
-) -> Result<HashMap<String, aws_sdk_dynamodb::types::AttributeValue>, PageTokenError> {
-    use base64::Engine;
-    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
-        .decode(token)
-        .map_err(|_| page_token_error("invalid base64"))?;
-    let parsed: StoredPageToken =
-        serde_json::from_slice(&bytes).map_err(|_| page_token_error("invalid payload"))?;
-
-    if parsed.pk != expected_pk {
-        return Err(page_token_error("partition mismatch"));
-    }
-    if !parsed.sk.starts_with(expected_sk_prefix) {
-        return Err(page_token_error("sort-key family mismatch"));
+        use base64::Engine;
+        let encoding = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        Ok(format!(
+            "{}.{}",
+            encoding.encode(payload),
+            encoding.encode(tag)
+        ))
     }
 
-    Ok(HashMap::from([
-        (
-            "pk".to_owned(),
-            aws_sdk_dynamodb::types::AttributeValue::S(parsed.pk),
-        ),
-        (
-            "sk".to_owned(),
-            aws_sdk_dynamodb::types::AttributeValue::S(parsed.sk),
-        ),
-    ]))
+    /// Authenticate and decode a token only for the same table, query family,
+    /// scan direction, workflow partition, and sort-key family.
+    pub(crate) fn decode_page_token(
+        &self,
+        token: &str,
+        expected_query_family: &'static str,
+        expected_scan_forward: bool,
+        expected_pk: &str,
+        expected_sk_prefix: &str,
+    ) -> Result<HashMap<String, aws_sdk_dynamodb::types::AttributeValue>, PageTokenError> {
+        use base64::Engine;
+        let (payload_encoded, tag_encoded) = token
+            .split_once('.')
+            .ok_or_else(|| page_token_error("invalid token format"))?;
+        let encoding = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let payload = encoding
+            .decode(payload_encoded)
+            .map_err(|_| page_token_error("invalid base64"))?;
+        let tag = encoding
+            .decode(tag_encoded)
+            .map_err(|_| page_token_error("invalid base64"))?;
+        self.verify_page_token_tag(&payload, &tag)?;
+        let parsed: StoredPageToken =
+            serde_json::from_slice(&payload).map_err(|_| page_token_error("invalid payload"))?;
+
+        if parsed.table_name != self.table_name {
+            return Err(page_token_error("table mismatch"));
+        }
+        if parsed.query_family != expected_query_family {
+            return Err(page_token_error("query family mismatch"));
+        }
+        if parsed.scan_forward != expected_scan_forward {
+            return Err(page_token_error("scan direction mismatch"));
+        }
+        if parsed.pk != expected_pk {
+            return Err(page_token_error("partition mismatch"));
+        }
+        if !parsed.sk.starts_with(expected_sk_prefix) {
+            return Err(page_token_error("sort-key family mismatch"));
+        }
+
+        Ok(HashMap::from([
+            (
+                "pk".to_owned(),
+                aws_sdk_dynamodb::types::AttributeValue::S(parsed.pk),
+            ),
+            (
+                "sk".to_owned(),
+                aws_sdk_dynamodb::types::AttributeValue::S(parsed.sk),
+            ),
+        ]))
+    }
+
+    fn page_token_tag(&self, payload: &[u8]) -> Result<Vec<u8>, StorageError> {
+        let mut mac = PageTokenMac::new_from_slice(&self.page_token_key).map_err(|_| {
+            StorageError::Build {
+                operation: "page token sign",
+            }
+        })?;
+        mac.update(payload);
+        Ok(mac.finalize().into_bytes().to_vec())
+    }
+
+    fn verify_page_token_tag(&self, payload: &[u8], tag: &[u8]) -> Result<(), PageTokenError> {
+        let mut mac = PageTokenMac::new_from_slice(&self.page_token_key)
+            .map_err(|_| page_token_error("invalid signing key"))?;
+        mac.update(payload);
+        mac.verify_slice(tag)
+            .map_err(|_| page_token_error("invalid signature"))
+    }
 }
 
 fn required_page_key<'a>(
@@ -352,6 +430,13 @@ mod tests {
 
     use super::*;
 
+    fn test_client() -> aws_sdk_dynamodb::Client {
+        let config = aws_sdk_dynamodb::Config::builder()
+            .endpoint_url("http://127.0.0.1:9")
+            .build();
+        aws_sdk_dynamodb::Client::from_conf(config)
+    }
+
     #[test]
     fn table_name_rejects_empty_or_control_bearing_values() {
         assert!(matches!(
@@ -375,19 +460,21 @@ mod tests {
     }
 
     #[test]
-    fn store_construction_rejects_invalid_tables() -> Result<(), Box<dyn std::error::Error>> {
-        let config = aws_sdk_dynamodb::Config::builder()
-            .endpoint_url("http://localhost:8000")
-            .build();
-        let client = aws_sdk_dynamodb::Client::from_conf(config);
+    fn store_construction_rejects_invalid_tables_and_signing_keys()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let client = test_client();
         assert!(matches!(
-            DynamoDbStore::new(client.clone(), ""),
+            DynamoDbStore::new(client.clone(), "", [7; 32]),
             Err(StoreValidationError::TableNameEmpty)
         ));
-        let store = DynamoDbStore::new(client, "novus-app-dev")?;
+        assert!(matches!(
+            DynamoDbStore::new(client.clone(), "novus-app-dev", [0; 32]),
+            Err(StoreValidationError::InvalidPageTokenKey)
+        ));
+        let store = DynamoDbStore::new(client, "novus-app-dev", [7; 32])?;
         assert_eq!(
             format!("{store:?}"),
-            "DynamoDbStore { client: \"[REDACTED]\", table_name: \"novus-app-dev\" }"
+            "DynamoDbStore { client: \"[REDACTED]\", table_name: \"novus-app-dev\", page_token_key: \"[REDACTED]\" }"
         );
         Ok(())
     }
@@ -409,7 +496,8 @@ mod tests {
     }
 
     #[test]
-    fn page_tokens_round_trip_and_are_bound_to_exact_partition() {
+    fn page_tokens_are_authenticated_and_bound_to_repository_query_and_direction()
+    -> Result<(), Box<dyn std::error::Error>> {
         let key = HashMap::from([
             (
                 "pk".to_owned(),
@@ -422,20 +510,70 @@ mod tests {
                 ),
             ),
         ]);
-        let token = encode_page_token(&key).expect("valid key should encode");
-        let decoded = decode_page_token(&token, "WF#workflow-1", "HISTORY#")
+        let store = DynamoDbStore::new(test_client(), "novus-app-dev", [7; 32])?;
+        let token = store.encode_page_token(&key, "history", true)?;
+        let decoded = store
+            .decode_page_token(&token, "history", true, "WF#workflow-1", "HISTORY#")
             .expect("matching token should decode");
         assert_eq!(decoded, key);
-        assert!(decode_page_token(&token, "WF#workflow-10", "HISTORY#").is_err());
-        assert!(decode_page_token(&token, "WF#workflow-1", "OBJECT#").is_err());
+
+        let other_table = DynamoDbStore::new(test_client(), "novus-app-prod", [7; 32])?;
+        let other_key = DynamoDbStore::new(test_client(), "novus-app-dev", [8; 32])?;
+        assert!(
+            other_table
+                .decode_page_token(&token, "history", true, "WF#workflow-1", "HISTORY#")
+                .is_err()
+        );
+        assert!(
+            other_key
+                .decode_page_token(&token, "history", true, "WF#workflow-1", "HISTORY#")
+                .is_err()
+        );
+        assert!(
+            store
+                .decode_page_token(&token, "objects", true, "WF#workflow-1", "HISTORY#")
+                .is_err()
+        );
+        assert!(
+            store
+                .decode_page_token(&token, "history", false, "WF#workflow-1", "HISTORY#")
+                .is_err()
+        );
+        assert!(
+            store
+                .decode_page_token(&token, "history", true, "WF#workflow-10", "HISTORY#")
+                .is_err()
+        );
+        assert!(
+            store
+                .decode_page_token(&token, "history", true, "WF#workflow-1", "OBJECT#")
+                .is_err()
+        );
+
+        let mut tampered = token;
+        tampered.push('x');
+        assert!(
+            store
+                .decode_page_token(&tampered, "history", true, "WF#workflow-1", "HISTORY#")
+                .is_err()
+        );
+        Ok(())
     }
 
     #[test]
-    fn page_tokens_reject_unknown_fields() {
+    fn signed_page_tokens_reject_unknown_fields() -> Result<(), Box<dyn std::error::Error>> {
         use base64::Engine;
-        let token = base64::engine::general_purpose::URL_SAFE_NO_PAD
-            .encode(br#"{"pk":"WF#workflow-1","sk":"HISTORY#1","extra":true}"#);
-        assert!(decode_page_token(&token, "WF#workflow-1", "HISTORY#").is_err());
+        let store = DynamoDbStore::new(test_client(), "novus-app-dev", [7; 32])?;
+        let payload = br#"{"table_name":"novus-app-dev","query_family":"history","scan_forward":true,"pk":"WF#workflow-1","sk":"HISTORY#1","extra":true}"#;
+        let tag = store.page_token_tag(payload)?;
+        let encoding = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        let token = format!("{}.{}", encoding.encode(payload), encoding.encode(tag));
+        assert!(
+            store
+                .decode_page_token(&token, "history", true, "WF#workflow-1", "HISTORY#")
+                .is_err()
+        );
+        Ok(())
     }
 
     #[test]

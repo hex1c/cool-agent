@@ -143,7 +143,7 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
     let client = local_client();
     let table_name = format!("novus-test-{}", uuid::Uuid::new_v4().simple());
     create_table(&client, &table_name).await?;
-    let store = DynamoDbStore::new(client.clone(), table_name.clone())?;
+    let store = DynamoDbStore::new(client.clone(), table_name.clone(), [7; 32])?;
 
     let initial = Workflow::new(
         WorkflowId::new("workflow-race")?,
@@ -402,7 +402,7 @@ async fn dynamodb_history_and_object_metadata_are_immutable_and_page_in_order()
     let client = local_client();
     let table_name = format!("novus-test-{}", uuid::Uuid::new_v4().simple());
     create_table(&client, &table_name).await?;
-    let store = DynamoDbStore::new(client.clone(), table_name.clone())?;
+    let store = DynamoDbStore::new(client.clone(), table_name.clone(), [7; 32])?;
     let workflow_id = WorkflowId::new("workflow-storage-page")?;
 
     let raw_object = StoredObject {

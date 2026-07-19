@@ -178,13 +178,12 @@ impl ObjectMetadataRepository for DynamoDbStore {
             .limit(i32::from(request.limit));
 
         if let Some(ref token) = request.token {
-            let exclusive_start_key =
-                crate::dynamodb::decode_page_token(token.as_str(), &pk, sk_prefix).map_err(
-                    |_| StorageError::CorruptItem {
-                        entity: "object metadata",
-                        field: "page token",
-                    },
-                )?;
+            let exclusive_start_key = self
+                .decode_page_token(token.as_str(), "objects", true, &pk, sk_prefix)
+                .map_err(|_| StorageError::CorruptItem {
+                    entity: "object metadata",
+                    field: "page token",
+                })?;
             query = query.set_exclusive_start_key(Some(exclusive_start_key));
         }
 
@@ -226,7 +225,7 @@ impl ObjectMetadataRepository for DynamoDbStore {
 
         let next_token = match output.last_evaluated_key {
             Some(ref lek) if !lek.is_empty() => {
-                let token_str = crate::dynamodb::encode_page_token(lek)?;
+                let token_str = self.encode_page_token(lek, "objects", true)?;
                 Some(
                     PageToken::new(token_str).map_err(|_| StorageError::CorruptItem {
                         entity: "object metadata",
