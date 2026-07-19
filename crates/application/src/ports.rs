@@ -251,6 +251,11 @@ pub trait ObjectStore {
     type Error: Display;
 
     async fn put(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error>;
+    /// Retrieve an object's bytes. Implementations **must** re-verify the
+    /// content against `object.byte_length` and `object.sha256` before
+    /// returning `Ok`; a mismatch must produce an error. This contract is
+    /// relied upon by the publication coordinator's ambiguous-put
+    /// disambiguation path.
     async fn get(&self, object: &StoredObject) -> Result<Vec<u8>, Self::Error>;
 }
 
