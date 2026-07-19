@@ -1,0 +1,37 @@
+{
+  "update_id": 1002,
+  "message": {
+    "message_id": 15,
+    "from": {
+      "id": 111111111,
+      "is_bot": false,
+      "first_name": "Owner-A"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "type": "supergroup",
+      "title": "Novus Dev Forum"
+    },
+    "date": 1717000100,
+    "message_thread_id": 10,
+    "is_topic_message": true,
+    "text": "please use the attached spreadsheet instead",
+    "reply_to_message": {
+      "message_id": 10,
+      "from": {
+        "id": 999999999,
+        "is_bot": true,
+        "first_name": "novus_bot"
+      },
+      "chat": {
+        "id": -1001234567890,
+        "type": "supergroup",
+        "title": "Novus Dev Forum"
+      },
+      "date": 1717000050,
+      "message_thread_id": 20,
+      "is_topic_message": true,
+      "text": "I received your request. Which spreadsheet should I use?"
+    }
+  }
+}

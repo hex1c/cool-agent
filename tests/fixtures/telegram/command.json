@@ -1,0 +1,27 @@
+{
+  "update_id": 1005,
+  "message": {
+    "message_id": 30,
+    "from": {
+      "id": 111111111,
+      "is_bot": false,
+      "first_name": "Owner-A"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "type": "supergroup",
+      "title": "Novus Dev Forum"
+    },
+    "date": 1717000400,
+    "message_thread_id": 10,
+    "is_topic_message": true,
+    "text": "/done",
+    "entities": [
+      {
+        "type": "bot_command",
+        "offset": 0,
+        "length": 5
+      }
+    ]
+  }
+}

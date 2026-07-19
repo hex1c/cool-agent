@@ -638,13 +638,13 @@ events while deduplicating `update_id` and rejecting unsupported chat types.
 
 **Acceptance criteria:**
 
-- [ ] Invalid webhook secret tokens are rejected before parsing business events.
-- [ ] Recorded fixtures normalize mentions, replies, callbacks, media, and commands correctly.
-- [ ] Duplicate and cross-topic updates cannot create or mutate another workflow.
+- [x] Invalid webhook secret tokens are rejected before parsing business events.
+- [x] Recorded fixtures normalize mentions, replies, callbacks, media, and commands correctly.
+- [x] Duplicate and cross-topic updates cannot create or mutate another workflow.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p telegram webhook normalize deduplicate`
+- [x] Tests pass: `cargo test -p telegram webhook normalize deduplicate`
 
 **Dependencies:** Safety Core Proven checkpoint, Tasks 1, 14, 17, 20
 
