@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
 
-use application::ports::{SecretProvider, SecretReference};
+use application::ports::{PortValueError, SecretProvider, SecretReference, SecretValue};
 use aws_sdk_ssm::types::ParameterType;
 
 pub const MAX_STANDARD_SECURE_STRING_BYTES: usize = 4_096;
@@ -136,7 +136,7 @@ impl SsmSecretProvider {
     fn decode_parameter(
         reference: &SecretReference,
         parameter: aws_sdk_ssm::types::Parameter,
-    ) -> Result<Vec<u8>, SecretProviderError> {
+    ) -> Result<SecretValue, SecretProviderError> {
         if parameter.name.as_deref() != Some(reference.as_str()) {
             return Err(SecretProviderValidationError::ParameterNameMismatch.into());
         }
@@ -149,10 +149,8 @@ impl SsmSecretProvider {
         if value.len() > MAX_STANDARD_SECURE_STRING_BYTES {
             return Err(SecretProviderValidationError::ParameterValueTooLarge.into());
         }
-        if value.is_empty() {
-            return Err(SecretProviderError::SecretValue);
-        }
-        Ok(value.into_bytes())
+        SecretValue::new(value.into_bytes())
+            .map_err(|_error: PortValueError| SecretProviderError::SecretValue)
     }
 }
 
@@ -160,7 +158,7 @@ impl SsmSecretProvider {
 impl SecretProvider for SsmSecretProvider {
     type Error = SecretProviderError;
 
-    async fn get_secret_bytes(&self, reference: &SecretReference) -> Result<Vec<u8>, Self::Error> {
+    async fn get_secret(&self, reference: &SecretReference) -> Result<SecretValue, Self::Error> {
         self.validate_reference(reference)?;
         let output = self
             .client
@@ -262,9 +260,10 @@ mod tests {
             .r#type(ParameterType::SecureString)
             .value("sensitive-test-value")
             .build();
-        let bytes = SsmSecretProvider::decode_parameter(&reference, parameter)
+        let secret = SsmSecretProvider::decode_parameter(&reference, parameter)
             .expect("SecureString should decode");
-        assert_eq!(bytes, b"sensitive-test-value");
+        assert_eq!(secret.expose(), b"sensitive-test-value");
+        assert_eq!(format!("{secret:?}"), "SecretValue([REDACTED])");
     }
 
     #[test]

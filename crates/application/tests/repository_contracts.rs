@@ -135,16 +135,16 @@ fn object_contract_enforces_environment_bound_prefix_classes() {
 
 #[tokio::test]
 async fn secret_values_are_redacted_and_references_are_environment_scoped() {
-    use application::ports::{SecretProvider, SecretReference, resolve_secret};
+    use application::ports::{SecretProvider, SecretReference, SecretValue, resolve_secret};
 
     struct MockProvider;
     impl SecretProvider for MockProvider {
         type Error = std::convert::Infallible;
-        async fn get_secret_bytes(
+        async fn get_secret(
             &self,
             _reference: &SecretReference,
-        ) -> Result<Vec<u8>, Self::Error> {
-            Ok(b"sensitive-test-value".to_vec())
+        ) -> Result<SecretValue, Self::Error> {
+            Ok(SecretValue::new(b"sensitive-test-value".to_vec()).expect("non-empty"))
         }
     }
 

@@ -1031,15 +1031,15 @@ mod tests {
         // Use a mock SecretProvider to resolve a SecretValue through the
         // provenance-safe resolve_secret path, then construct a
         // HistorySanitizer.
-        use application::ports::{SecretProvider, SecretReference, resolve_secret};
+        use application::ports::{SecretProvider, SecretReference, SecretValue, resolve_secret};
         struct MockSecretProvider;
         impl SecretProvider for MockSecretProvider {
             type Error = std::convert::Infallible;
-            async fn get_secret_bytes(
+            async fn get_secret(
                 &self,
                 _reference: &SecretReference,
-            ) -> Result<Vec<u8>, Self::Error> {
-                Ok(b"mock-secret".to_vec())
+            ) -> Result<SecretValue, Self::Error> {
+                Ok(SecretValue::new(b"mock-secret".to_vec()).expect("non-empty"))
             }
         }
         let mock_ref = SecretReference::new("/novus/test/mock").expect("valid ref");

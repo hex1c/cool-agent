@@ -12,7 +12,7 @@ use domain::WorkflowTimestamp;
 use domain::identity::WorkflowId;
 use sha2::{Digest, Sha256};
 use storage::s3::{S3Error, S3ObjectStore, S3ValidationError};
-use storage::secrets::{SecretProviderError, SecretProviderValidationError, SsmSecretProvider};
+use storage::secrets::SsmSecretProvider;
 
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:4566";
 
@@ -253,19 +253,13 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
     let plain_reference = SecretReference::new(&plain_name)?;
     assert!(matches!(
         resolve_secret(&provider, &plain_reference).await,
-        Err(application::ports::SecretResolutionError::Provider(
-            SecretProviderError::Validation(
-                SecretProviderValidationError::ParameterNotSecureString
-            )
-        ))
+        Err(application::ports::SecretResolutionError::Provider)
     ));
     let cross_environment =
         SecretReference::new(format!("/novus/staging/integration/{unique}/secret"))?;
     assert!(matches!(
         resolve_secret(&provider, &cross_environment).await,
-        Err(application::ports::SecretResolutionError::Provider(
-            SecretProviderError::Validation(SecretProviderValidationError::ReferenceOutOfScope)
-        ))
+        Err(application::ports::SecretResolutionError::Provider)
     ));
 
     for key in [

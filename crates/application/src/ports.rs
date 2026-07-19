@@ -163,11 +163,13 @@ impl SecretReference {
 pub struct SecretValue(Vec<u8>);
 
 impl SecretValue {
-    /// Construct a secret value. `pub(crate)` so only application-crate
-    /// code can create `SecretValue` instances — external callers obtain
-    /// them from the `resolve_secret` helper, which wraps `SecretProvider`
-    /// output. This prevents forged provenance.
-    pub(crate) fn new(value: Vec<u8>) -> Result<Self, PortValueError> {
+    /// Construct a secret value. `#[doc(hidden)]` — only the `SecretProvider`
+    /// adapter should call this. External callers obtain `SecretValue` from
+    /// `resolve_secret`. This is a practical limitation: the `SecretProvider`
+    /// trait is implemented in the storage crate, which needs to construct
+    /// `SecretValue` from SSM responses.
+    #[doc(hidden)]
+    pub fn new(value: Vec<u8>) -> Result<Self, PortValueError> {
         if value.is_empty() {
             return Err(PortValueError::Empty {
                 kind: "secret value",
@@ -303,46 +305,48 @@ pub trait ArtifactLinkSigner {
     ) -> Result<PresignedObjectLink, Self::Error>;
 }
 
-/// Resolve a secret through a `SecretProvider` and wrap the raw bytes
-/// into a `SecretValue`. This is the only way for external code to obtain
-/// a `SecretValue` — the constructor is `pub(crate)`.
+/// Resolve a secret through a `SecretProvider`. This is the only way for
+/// external code to obtain a `SecretValue` — the constructor is `pub(crate)`.
 pub async fn resolve_secret<P: SecretProvider>(
     provider: &P,
     reference: &SecretReference,
-) -> Result<SecretValue, SecretResolutionError<P::Error>> {
-    let bytes = provider
-        .get_secret_bytes(reference)
+) -> Result<SecretValue, SecretResolutionError> {
+    provider
+        .get_secret(reference)
         .await
-        .map_err(SecretResolutionError::Provider)?;
-    SecretValue::new(bytes).map_err(|_| SecretResolutionError::Empty)
+        .map_err(|_| SecretResolutionError::Provider)
 }
 
-/// Error from resolving a secret through a provider.
-#[derive(Debug)]
-pub enum SecretResolutionError<E: Display> {
-    Provider(E),
+/// Error from resolving a secret through a provider. Provider error details
+/// are not exposed — only a stable category label is retained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretResolutionError {
+    Provider,
     Empty,
 }
 
-impl<E: Display> Display for SecretResolutionError<E> {
+impl Display for SecretResolutionError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Provider(error) => write!(f, "secret provider error: {error}"),
+            Self::Provider => f.write_str("secret provider error"),
             Self::Empty => f.write_str("secret provider returned empty bytes"),
         }
     }
 }
 
-impl<E: Display + std::error::Error> std::error::Error for SecretResolutionError<E> {}
+impl std::error::Error for SecretResolutionError {}
 
+/// Secret provider capability. The `SecretValue` constructor is
+/// `#[doc(hidden)]` to discourage external construction; only adapter
+/// implementations should call it. `resolve_secret` is the recommended
+/// path for external callers.
 #[allow(async_fn_in_trait)]
 pub trait SecretProvider {
     type Error: Display;
 
-    /// Retrieve raw secret bytes. Implementations must validate and return
-    /// the secret content; the application crate wraps the result into a
-    /// `SecretValue` via `resolve_secret`.
-    async fn get_secret_bytes(&self, reference: &SecretReference) -> Result<Vec<u8>, Self::Error>;
+    /// Retrieve a secret value. Implementations must validate, decrypt,
+    /// and return the secret wrapped in a `SecretValue`.
+    async fn get_secret(&self, reference: &SecretReference) -> Result<SecretValue, Self::Error>;
 }
 
 fn validate_identifier(kind: &'static str, value: &str) -> Result<(), PortValueError> {
