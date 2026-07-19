@@ -6,4 +6,5 @@ pub mod journal;
 pub mod keys;
 pub mod objects;
 pub mod s3;
+pub mod secrets;
 pub mod workflows;

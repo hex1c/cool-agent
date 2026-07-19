@@ -14,6 +14,7 @@ aws-sdk-dynamodb = { version = "=1.117.0", features = [
   "behavior-version-latest",
 ] }
 aws-sdk-s3 = { version = "=1.138.1", features = ["behavior-version-latest"] }
+aws-sdk-ssm = { version = "=1.116.0", features = ["behavior-version-latest"] }
 domain = { path = "../domain" }
 application = { path = "../application" }
 serde = { version = "1.0", features = ["derive"] }
