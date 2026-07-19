@@ -693,15 +693,15 @@ chat only.
 
 **Acceptance criteria:**
 
-- [ ] State is short-lived, single-use, participant-bound, and replay-resistant.
-- [ ] Refresh tokens enter separate Parameter Store `SecureString` values; token
+- [x] State is short-lived, single-use, participant-bound, and replay-resistant.
+- [x] Refresh tokens enter separate Parameter Store `SecureString` values; token
   values never enter topics or logs.
-- [ ] Revocation pauses Google-dependent work without deleting history; token endpoint calls use the shared retry/ambiguity executor.
+- [x] Revocation pauses Google-dependent work without deleting history; token endpoint calls use the shared retry/ambiguity executor.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p oauth --all-features`
-- [ ] Integration check: mocked connect, refresh, revoke, and reconnect pass.
+- [x] Tests pass: `cargo test -p oauth --all-features`
+- [x] Integration check: mocked connect, refresh, revoke, and reconnect pass.
 
 **Dependencies:** Tasks 6, 21, 23
 
