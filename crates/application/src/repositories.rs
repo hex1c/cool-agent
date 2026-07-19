@@ -284,8 +284,8 @@ impl std::error::Error for ConsumeAndPrepareError {}
 /// The constructor fails before I/O unless the domain guarantees hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConsumeAndPrepareRequest {
-    pub consumption: ConfirmationConsumption,
-    pub operation_key: IdempotencyKey,
+    consumption: ConfirmationConsumption,
+    operation_key: IdempotencyKey,
 }
 
 impl ConsumeAndPrepareRequest {
@@ -293,28 +293,41 @@ impl ConsumeAndPrepareRequest {
         consumption: ConfirmationConsumption,
         operation_key: IdempotencyKey,
     ) -> Result<Self, ConsumeAndPrepareError> {
-        let resulting_revision = consumption.transition.workflow.revision();
+        let request = Self {
+            consumption,
+            operation_key,
+        };
+        request.validate()?;
+        Ok(request)
+    }
 
-        if operation_key.workflow_id() != consumption.transition.workflow.id() {
+    pub fn validate(&self) -> Result<(), ConsumeAndPrepareError> {
+        let transition = self.consumption.transition();
+        let resulting_revision = transition.workflow.revision();
+
+        if self.operation_key.workflow_id() != transition.workflow.id() {
             return Err(ConsumeAndPrepareError::WorkflowIdMismatch);
         }
-        if operation_key.workflow_revision() != resulting_revision {
+        if self.operation_key.workflow_revision() != resulting_revision {
             return Err(ConsumeAndPrepareError::RevisionMismatch {
-                operation: operation_key.workflow_revision(),
+                operation: self.operation_key.workflow_revision(),
                 confirmation: resulting_revision,
             });
         }
-        let confirmation_action = consumption.confirmation.action();
-        let confirmation_target = consumption.confirmation.mutation_target();
-        if operation_key.target().as_bytes() != confirmation_target.as_bytes() {
+        let confirmation_action = self.consumption.confirmation().action();
+        let confirmation_target = self.consumption.confirmation().mutation_target();
+        if self.operation_key.target().as_bytes() != confirmation_target.as_bytes() {
             return Err(ConsumeAndPrepareError::TargetMismatch);
         }
-        Self::validate_action_kind_pair(confirmation_action, operation_key.operation_kind())?;
+        Self::validate_action_kind_pair(confirmation_action, self.operation_key.operation_kind())
+    }
 
-        Ok(Self {
-            consumption,
-            operation_key,
-        })
+    pub const fn consumption(&self) -> &ConfirmationConsumption {
+        &self.consumption
+    }
+
+    pub const fn operation_key(&self) -> &IdempotencyKey {
+        &self.operation_key
     }
 
     fn validate_action_kind_pair(
@@ -354,11 +367,13 @@ pub struct ConsumeAndPrepareOutcome {
 
 impl From<ConsumeAndPrepareRequest> for ConsumeAndPrepareOutcome {
     fn from(request: ConsumeAndPrepareRequest) -> Self {
+        let (transition, confirmation, authorization_audit, precondition) =
+            request.consumption.into_parts();
         Self {
-            transition: request.consumption.transition,
-            confirmation: request.consumption.confirmation,
-            precondition: request.consumption.precondition,
-            authorization_audit: request.consumption.authorization,
+            transition,
+            confirmation,
+            precondition,
+            authorization_audit,
             operation_key: request.operation_key,
         }
     }

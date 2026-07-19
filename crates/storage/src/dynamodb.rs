@@ -20,6 +20,7 @@ pub enum StoreValidationError {
     Key(super::keys::KeyError),
     PayloadTooLarge { bytes: usize, maximum: usize },
     InvalidTransitionRevisions,
+    InvalidConfirmationOperationBinding,
     InvalidHistoryCheckpoint,
     InvalidObjectMetadata,
 }
@@ -45,6 +46,9 @@ impl Display for StoreValidationError {
             }
             Self::InvalidTransitionRevisions => {
                 formatter.write_str("workflow and audit revisions are inconsistent")
+            }
+            Self::InvalidConfirmationOperationBinding => {
+                formatter.write_str("confirmation and operation binding is invalid")
             }
             Self::InvalidHistoryCheckpoint => formatter.write_str("history checkpoint is invalid"),
             Self::InvalidObjectMetadata => formatter.write_str("object metadata is invalid"),

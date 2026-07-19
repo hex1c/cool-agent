@@ -285,8 +285,8 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
         },
     )?;
     let operation_key = IdempotencyKey::new(
-        consumed.transition.workflow.id().clone(),
-        consumed.transition.workflow.revision(),
+        consumed.transition().workflow.id().clone(),
+        consumed.transition().workflow.revision(),
         OperationKind::GoogleWrite,
         OperationTargetFingerprint::new([2; 32]),
     );
@@ -316,7 +316,7 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
     ));
     let consumed_confirmation = ConfirmationRepository::load(
         &store,
-        request.consumption.transition.workflow.id(),
+        request.consumption().transition().workflow.id(),
         &confirmation_id,
     )
     .await?;
@@ -326,8 +326,8 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
     ));
 
     let (audit_pk, audit_sk) = storage::keys::audit(
-        request.consumption.transition.workflow.id(),
-        request.consumption.transition.workflow.revision(),
+        request.consumption().transition().workflow.id(),
+        request.consumption().transition().workflow.revision(),
     )?;
     let audit_item = client
         .get_item()
@@ -352,7 +352,7 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
         } if transition.owner == participant(101)?
             && transition.actor == participant(202)?
             && transition.source_message == MessageId::new(8)?
-            && transition.new_revision == request.consumption.transition.workflow.revision()
+            && transition.new_revision == request.consumption().transition().workflow.revision()
             && authorization.actor == participant(202)?
     ));
 
