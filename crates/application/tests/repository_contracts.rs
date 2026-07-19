@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use application::ports::{
-    ObjectClass, PageToken, PortValueError, SecretReference, SecretValue, StorageKey,
-    StorageRecordId, StoredObject,
+    ObjectClass, PageToken, PortValueError, PresignedObjectLink, SecretReference, SecretValue,
+    StorageKey, StorageRecordId, StoredObject,
 };
 use application::repositories::{
     HistoryCheckpoint, HistorySequence, InvoiceMonth, MAX_PAGE_SIZE, PageRequest,
@@ -146,6 +146,19 @@ fn secret_values_are_redacted_and_references_are_environment_scoped() {
         Err(PortValueError::InvalidSecretReference)
     ));
     assert!(SecretReference::new("/novus/development/bad path").is_err());
+}
+
+#[test]
+fn presigned_object_links_are_explicitly_exposed_and_redacted_by_default() {
+    let link =
+        PresignedObjectLink::new("https://example.invalid/artifact.pdf?X-Amz-Signature=sensitive")
+            .expect("bounded HTTP URL should be accepted");
+    assert_eq!(format!("{link:?}"), "PresignedObjectLink([REDACTED])");
+    assert!(link.as_str().starts_with("https://example.invalid/"));
+
+    assert!(PresignedObjectLink::new("").is_err());
+    assert!(PresignedObjectLink::new("file:///tmp/artifact.pdf").is_err());
+    assert!(PresignedObjectLink::new("https://example.invalid/bad\nurl").is_err());
 }
 
 #[test]
