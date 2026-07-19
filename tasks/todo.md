@@ -593,11 +593,11 @@ guards.
 
 **Acceptance criteria:**
 
-- [ ] Raw inputs, generated PDFs, and large sanitized histories use separate prefixes. Per-class IAM access policies are deferred to Task 39A under an approved exception.
-- [ ] OAuth/SMTP/model secrets are retrieved only through secret references and never logged.
-- [ ] Presigned links obey configured expiry and sanitized history excludes credential material.
-- [ ] Object publication coordinator proves S3 acceptance before publishing DynamoDB object/history pointers, disambiguates ambiguous S3 outcomes, and fails closed when the object cannot be confirmed.
-- [ ] Pagination tokens are authenticated (HMAC-SHA256) and bound to the exact table, repository/query family, scan direction, workflow partition, and sort-key family.
+- [x] Raw inputs, generated PDFs, and large sanitized histories use separate prefixes. Per-class IAM access policies are deferred to Task 39A under an approved exception.
+- [x] OAuth/SMTP/model secrets are retrieved only through secret references and never logged.
+- [x] Presigned links obey configured expiry and sanitized history excludes credential material.
+- [x] Object publication coordinator proves S3 acceptance before publishing DynamoDB object/history pointers, disambiguates ambiguous S3 outcomes, and fails closed when the object cannot be confirmed.
+- [x] Pagination tokens are authenticated (HMAC-SHA256) and bound to the exact table, repository/query family, scan direction, workflow partition, and sort-key family.
 
 **Approved security exceptions:**
 
@@ -606,10 +606,10 @@ guards.
 
 **Verification:**
 
-- [ ] Unit tests pass: `cargo test -p storage --lib`
-- [ ] Live S3/SSM integration tests pass against LocalStack: `LOCALSTACK_ENDPOINT=http://127.0.0.1:4566 cargo test -p storage --test object_integration --features integration -- --nocapture`
-- [ ] Live DynamoDB Local integration tests pass: `cargo test -p storage --test dynamodb_integration --features integration -- --nocapture`
-- [ ] Publication coordinator tests pass: `cargo test -p application publication --lib`
+- [x] Unit tests pass: `cargo test -p storage --lib`
+- [x] Live S3/SSM integration tests pass against LocalStack: `LOCALSTACK_ENDPOINT=http://127.0.0.1:4566 cargo test -p storage --test object_integration --features integration -- --nocapture`
+- [x] Live DynamoDB Local integration tests pass: `cargo test -p storage --test dynamodb_integration --features integration -- --nocapture`
+- [x] Publication coordinator tests pass: `cargo test -p application publication --lib`
 
 **Dependencies:** Task 19
 
@@ -625,9 +625,9 @@ guards.
 
 ## Checkpoint: Safety Core Proven
 
-- [ ] Tasks 14-21 pass required branch and concurrency checks.
-- [ ] Persistence contracts are frozen before handlers and adapters consume them.
-- [ ] Security reviewer approves confirmation, idempotency, and secret boundaries.
+- [x] Tasks 14-21 pass required branch and concurrency checks.
+- [x] Persistence contracts are frozen before handlers and adapters consume them.
+- [x] Security reviewer approves confirmation, idempotency, and secret boundaries.
 
 ## Phase 3: Telegram and OAuth Vertical Slice
 
