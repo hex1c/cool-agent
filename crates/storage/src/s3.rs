@@ -720,13 +720,23 @@ impl ObjectStore for S3ObjectStore {
 impl HistoryStore for S3ObjectStore {
     type Error = S3Error;
 
-    async fn put_history(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error> {
+    async fn put_history(
+        &self,
+        object: &StoredObject,
+        history: &application::sanitized_history::SanitizedHistory,
+    ) -> Result<(), Self::Error> {
         validate_object(object)?;
 
         // Only SanitizedHistory is accepted through this typed path.
         if object.class != ObjectClass::SanitizedHistory {
             return Err(S3ValidationError::NonHistoryClassRejected.into());
         }
+
+        // Serialize the typed SanitizedHistory internally — callers cannot
+        // supply raw bytes.
+        let bytes = history
+            .serialize()
+            .map_err(|_| S3ValidationError::InvalidJson)?;
 
         let (limit, class_name) = self.class_limit(object.class);
         let body_len = bytes.len() as u64;
@@ -739,18 +749,18 @@ impl HistoryStore for S3ObjectStore {
             .into());
         }
 
-        check_length_and_hash(bytes, object.byte_length, &object.sha256)?;
+        check_length_and_hash(&bytes, object.byte_length, &object.sha256)?;
 
         if object.media_type != "application/json" {
             return Err(S3ValidationError::NotJsonMediaType.into());
         }
-        validate_sanitized_history(bytes, limit)?;
+        validate_sanitized_history(&bytes, limit)?;
 
         self.client
             .put_object()
             .bucket(&self.bucket)
             .key(object.storage_key.as_str())
-            .body(ByteStream::from(bytes.to_vec()))
+            .body(ByteStream::from(bytes))
             .if_none_match("*")
             .server_side_encryption(ServerSideEncryption::Aes256)
             .content_type(&object.media_type)
@@ -1001,22 +1011,46 @@ mod tests {
         ));
 
         let unsafe_history = br#"{"refreshToken":"sensitive"}"#;
-        let history = make_object(
+        // SanitizedHistory must go through HistoryStore::put_history, not
+        // ObjectStore::put.
+        let history_for_reject = make_object(
             &workflow_id,
             ObjectClass::SanitizedHistory,
             "history/workflow-1/00000000000000000001.json",
             "application/json",
             unsafe_history,
         );
-        // SanitizedHistory must go through HistoryStore::put_history, not
-        // ObjectStore::put.
         assert!(matches!(
-            store.put(&history, unsafe_history).await,
+            store.put(&history_for_reject, unsafe_history).await,
             Err(S3Error::Validation(S3ValidationError::HistoryClassRejected))
         ));
+        // Create a SanitizedHistory whose content contains a credential
+        // marker that the sanitizer did not redact (defense-in-depth).
+        // Build the StoredObject from the serialized bytes so hash/length
+        // match, then verify the storage-layer regex catches it.
+        let unsafe_sanitized = application::sanitized_history::HistorySanitizer::no_secrets(
+            application::sanitized_history::NoSecretsUsed::attest(),
+        )
+        .sanitize(vec![(
+            application::sanitized_history::SanitizedRole::User,
+            "the refresh_token=sensitive was leaked".to_owned(),
+        )])
+        .expect("should construct");
+        let unsafe_serialized = unsafe_sanitized.serialize().expect("should serialize");
+        let unsafe_history_obj = make_object(
+            &workflow_id,
+            ObjectClass::SanitizedHistory,
+            "history/workflow-1/00000000000000000002.json",
+            "application/json",
+            &unsafe_serialized,
+        );
         assert!(matches!(
-            store.put_history(&history, unsafe_history).await,
-            Err(S3Error::Validation(S3ValidationError::CredentialKeyPresent))
+            store
+                .put_history(&unsafe_history_obj, &unsafe_sanitized)
+                .await,
+            Err(S3Error::Validation(
+                S3ValidationError::CredentialValueMarker
+            ))
         ));
     }
 

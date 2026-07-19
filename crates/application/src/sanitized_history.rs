@@ -102,13 +102,45 @@ impl Debug for SanitizedHistory {
     }
 }
 
+/// Explicit attestation that no secrets were used in a conversation.
+/// This type cannot be constructed by accident — the caller must
+/// deliberately call [`NoSecretsUsed::attest`], acknowledging that they
+/// have verified no secret values appear in the message content.
+#[derive(Debug, Clone, Copy)]
+pub struct NoSecretsUsed {
+    _private: (),
+}
+
+impl NoSecretsUsed {
+    /// Explicitly attest that no secrets were used. The caller takes
+    /// responsibility for verifying this claim.
+    pub const fn attest() -> Self {
+        Self { _private: () }
+    }
+}
+
 /// Trusted sanitizer context that owns the known secret values for a
 /// conversation. This is the **only** way to construct a
 /// [`SanitizedHistory`] — the constructor is private so callers cannot
 /// bypass redaction by passing an incomplete or empty secret list without
 /// explicitly acknowledging it through one of the factory methods.
+///
+/// Secret values are zeroized when the sanitizer is dropped.
 pub struct HistorySanitizer {
     secrets: Vec<String>,
+}
+
+impl Drop for HistorySanitizer {
+    fn drop(&mut self) {
+        for secret in &mut self.secrets {
+            // Best-effort zeroization: overwrite with zeros of the same
+            // length, then clear. This does not use unsafe code.
+            let len = secret.len();
+            secret.clear();
+            secret.push_str(&"\0".repeat(len));
+            secret.clear();
+        }
+    }
 }
 
 impl HistorySanitizer {
@@ -125,9 +157,9 @@ impl HistorySanitizer {
     }
 
     /// Create a sanitizer for conversations where no secrets were used.
-    /// This is the explicit typed "no secrets" case — the caller must
-    /// acknowledge that no redaction is needed.
-    pub fn no_secrets() -> Self {
+    /// Requires an explicit [`NoSecretsUsed`] attestation — the caller
+    /// must deliberately acknowledge that no redaction is needed.
+    pub fn no_secrets(_attestation: NoSecretsUsed) -> Self {
         Self { secrets: vec![] }
     }
 
@@ -257,7 +289,7 @@ mod tests {
             SanitizedRole::Assistant,
         ];
         for role in roles {
-            let history = HistorySanitizer::no_secrets()
+            let history = HistorySanitizer::no_secrets(NoSecretsUsed::attest())
                 .sanitize(vec![(role, "content".to_owned())])
                 .expect("valid role should be accepted");
             assert_eq!(history.message_count(), 1);
@@ -270,7 +302,7 @@ mod tests {
             .map(|_| (SanitizedRole::User, "hi".to_owned()))
             .collect();
         assert!(matches!(
-            HistorySanitizer::no_secrets().sanitize(messages),
+            HistorySanitizer::no_secrets(NoSecretsUsed::attest()).sanitize(messages),
             Err(SanitizedHistoryError::TooManyMessages { .. })
         ));
     }
@@ -279,7 +311,8 @@ mod tests {
     fn enforces_content_size_limit() {
         let content = "x".repeat(MAX_CONTENT_BYTES + 1);
         assert!(matches!(
-            HistorySanitizer::no_secrets().sanitize(vec![(SanitizedRole::User, content)]),
+            HistorySanitizer::no_secrets(NoSecretsUsed::attest())
+                .sanitize(vec![(SanitizedRole::User, content)]),
             Err(SanitizedHistoryError::ContentTooLarge { .. })
         ));
     }
@@ -287,14 +320,15 @@ mod tests {
     #[test]
     fn rejects_empty_content() {
         assert!(matches!(
-            HistorySanitizer::no_secrets().sanitize(vec![(SanitizedRole::User, String::new())]),
+            HistorySanitizer::no_secrets(NoSecretsUsed::attest())
+                .sanitize(vec![(SanitizedRole::User, String::new())]),
             Err(SanitizedHistoryError::EmptyContent)
         ));
     }
 
     #[test]
     fn serialize_produces_versioned_envelope() {
-        let history = HistorySanitizer::no_secrets()
+        let history = HistorySanitizer::no_secrets(NoSecretsUsed::attest())
             .sanitize(vec![
                 (SanitizedRole::System, "You are helpful".to_owned()),
                 (SanitizedRole::User, "hello".to_owned()),
@@ -360,7 +394,7 @@ mod tests {
 
     #[test]
     fn redaction_preserves_message_order() {
-        let history = HistorySanitizer::no_secrets()
+        let history = HistorySanitizer::no_secrets(NoSecretsUsed::attest())
             .sanitize(vec![
                 (SanitizedRole::System, "system msg".to_owned()),
                 (SanitizedRole::User, "user msg".to_owned()),

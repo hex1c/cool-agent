@@ -1,4 +1,5 @@
 #![cfg(feature = "integration")]
+#![allow(clippy::expect_used)]
 
 use application::ports::{
     ArtifactLinkSigner, HistoryStore, ObjectClass, ObjectStore, SecretProvider, SecretReference,
@@ -136,31 +137,64 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
     let link = store.presign_artifact(&artifact).await?;
     assert!(link.as_str().contains("X-Amz-Expires=900"));
 
-    let history_bytes = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"hello"}]}"#;
+    // History: create a SanitizedHistory, serialize it, and build the
+    // StoredObject from the serialized bytes so hash/length match.
+    use application::sanitized_history::{HistorySanitizer, NoSecretsUsed, SanitizedRole};
+    let safe_history = HistorySanitizer::no_secrets(NoSecretsUsed::attest())
+        .sanitize(vec![(SanitizedRole::User, "hello".to_owned())])
+        .expect("valid history");
+    let history_bytes = safe_history.serialize().expect("should serialize");
+    use sha2::{Digest, Sha256};
+    let history_hash = Sha256::digest(&history_bytes);
     let history = object(
         &workflow_id,
         "history-1",
         ObjectClass::SanitizedHistory,
         &format!("history/{workflow_id}/00000000000000000001.json"),
         "application/json",
-        history_bytes,
+        &history_bytes,
     )?;
-    store.put_history(&history, history_bytes).await?;
+    // Override the hash/length to match the serialized SanitizedHistory.
+    let history = StoredObject {
+        sha256: {
+            let mut h = [0u8; 32];
+            h.copy_from_slice(history_hash.as_slice());
+            h
+        },
+        byte_length: history_bytes.len() as u64,
+        ..history
+    };
+    store.put_history(&history, &safe_history).await?;
     assert_eq!(store.get_history(&history).await?, history_bytes);
 
-    let unsafe_history_bytes = br#"{"refreshToken":"must-not-persist"}"#;
+    // Unsafe history: credential key in content that sanitizer didn't redact.
+    let unsafe_sanitized = HistorySanitizer::no_secrets(NoSecretsUsed::attest())
+        .sanitize(vec![(
+            SanitizedRole::User,
+            "the refresh_token=must-not-persist was leaked".to_owned(),
+        )])
+        .expect("should construct");
+    let unsafe_bytes = unsafe_sanitized.serialize().expect("should serialize");
+    let unsafe_hash = Sha256::digest(&unsafe_bytes);
     let unsafe_history = object(
         &workflow_id,
         "history-2",
         ObjectClass::SanitizedHistory,
         &format!("history/{workflow_id}/00000000000000000002.json"),
         "application/json",
-        unsafe_history_bytes,
+        &unsafe_bytes,
     )?;
+    let unsafe_history = StoredObject {
+        sha256: {
+            let mut h = [0u8; 32];
+            h.copy_from_slice(unsafe_hash.as_slice());
+            h
+        },
+        byte_length: unsafe_bytes.len() as u64,
+        ..unsafe_history
+    };
     assert!(matches!(
-        store
-            .put_history(&unsafe_history, unsafe_history_bytes)
-            .await,
+        store.put_history(&unsafe_history, &unsafe_sanitized).await,
         Err(S3Error::Validation(S3ValidationError::CredentialKeyPresent))
     ));
 

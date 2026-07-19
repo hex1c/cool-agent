@@ -266,15 +266,21 @@ pub trait ObjectStore {
 /// Typed history storage capability. Separated from `ObjectStore` so that
 /// raw `put` cannot be used to bypass producer-owned `SanitizedHistory`
 /// redaction. Implementations **must** reject any class other than
-/// `ObjectClass::SanitizedHistory`.
+/// `ObjectClass::SanitizedHistory`. The `put_history` method accepts a
+/// typed `&SanitizedHistory` — callers cannot supply raw bytes.
 #[allow(async_fn_in_trait)]
 pub trait HistoryStore {
     type Error: Display;
 
-    /// Store a sanitized-history object body. The caller (publication
-    /// coordinator) is responsible for proving the bytes originated from a
-    /// `SanitizedHistory` value.
-    async fn put_history(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error>;
+    /// Store a sanitized-history object. Implementations serialize the
+    /// `SanitizedHistory` internally, verify the bytes against
+    /// `object.byte_length` and `object.sha256`, validate the versioned
+    /// schema, and reject any class other than `SanitizedHistory`.
+    async fn put_history(
+        &self,
+        object: &StoredObject,
+        history: &crate::sanitized_history::SanitizedHistory,
+    ) -> Result<(), Self::Error>;
     /// Retrieve a sanitized-history object's bytes with hash/length
     /// re-verification, as per `ObjectStore::get`.
     async fn get_history(&self, object: &StoredObject) -> Result<Vec<u8>, Self::Error>;
