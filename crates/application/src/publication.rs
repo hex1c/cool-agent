@@ -22,6 +22,7 @@ use crate::ports::{ObjectStore, StoredObject};
 use crate::repositories::{
     ConditionalWriteOutcome, HistoryCheckpoint, HistoryRepository, ObjectMetadataRepository,
 };
+use crate::sanitized_history::SanitizedHistory;
 
 /// Failure reported by the publication coordinator.
 ///
@@ -41,6 +42,12 @@ pub enum PublicationError {
     /// whole publication, which will re-confirm the object and then either
     /// commit or conflict on the metadata).
     MetadataWrite { operation: &'static str },
+    /// The serialized SanitizedHistory does not match the checkpoint's
+    /// stored object (byte length or SHA-256). The producer must construct
+    /// the checkpoint from the serialized history's hash/length.
+    HistorySerializationMismatch,
+    /// The SanitizedHistory could not be serialized.
+    HistorySerializationFailed,
 }
 
 impl Display for PublicationError {
@@ -51,6 +58,12 @@ impl Display for PublicationError {
             }
             Self::MetadataWrite { operation } => {
                 write!(formatter, "metadata write failed during {operation}")
+            }
+            Self::HistorySerializationMismatch => {
+                formatter.write_str("serialized history does not match checkpoint object")
+            }
+            Self::HistorySerializationFailed => {
+                formatter.write_str("failed to serialize sanitized history")
             }
         }
     }
@@ -100,15 +113,31 @@ where
             })
     }
 
-    /// Publish a sanitized-history checkpoint: put the history body to object
-    /// storage, confirm durability, then append the history pointer in
-    /// DynamoDB.
+    /// Publish a sanitized-history checkpoint: serialize the producer-owned
+    /// [`SanitizedHistory`], verify the bytes match the checkpoint's stored
+    /// object (byte length and SHA-256), put the body to object storage,
+    /// confirm durability, then append the history pointer in DynamoDB.
     pub async fn publish_history(
         &self,
         checkpoint: &HistoryCheckpoint,
-        bytes: &[u8],
+        history: &SanitizedHistory,
     ) -> Result<ConditionalWriteOutcome, PublicationError> {
-        self.confirm_object(&checkpoint.object, bytes, "put history object")
+        let bytes = history
+            .serialize()
+            .map_err(|_| PublicationError::HistorySerializationFailed)?;
+
+        // Verify the serialized bytes match the checkpoint's stored object.
+        // The producer must construct the checkpoint from the serialized
+        // history's hash/length; a mismatch indicates a bug in the producer.
+        use sha2::{Digest, Sha256};
+        let computed_hash = Sha256::digest(&bytes);
+        if bytes.len() as u64 != checkpoint.object.byte_length
+            || computed_hash.as_slice() != checkpoint.object.sha256
+        {
+            return Err(PublicationError::HistorySerializationMismatch);
+        }
+
+        self.confirm_object(&checkpoint.object, &bytes, "put history object")
             .await?;
         self.history_repository
             .append(checkpoint)
@@ -150,8 +179,11 @@ mod tests {
     #![allow(clippy::expect_used)]
 
     use super::*;
-    use crate::ports::{ObjectClass, Page, PageToken, PortValueError, StorageKey, StorageRecordId};
+    use crate::ports::{
+        ObjectClass, Page, PageToken, PortValueError, StorageKey, StorageRecordId,
+    };
     use crate::repositories::PageRequest;
+    use crate::sanitized_history::{SanitizedHistory, SanitizedRole};
     use domain::WorkflowTimestamp;
     use domain::identity::WorkflowId;
     use std::collections::VecDeque;
@@ -352,6 +384,41 @@ mod tests {
         }
     }
 
+    fn make_history_checkpoint(serialized: &[u8]) -> (HistoryCheckpoint, SanitizedHistory) {
+        let workflow_id = WorkflowId::new("workflow-publication").expect("workflow id");
+        let storage_key = StorageKey::new(format!("history/{}/obj-1", workflow_id.as_str()))
+            .expect("storage key");
+        use sha2::{Digest, Sha256};
+        let hash = Sha256::digest(serialized);
+        let mut sha256 = [0_u8; 32];
+        sha256.copy_from_slice(hash.as_slice());
+        let object = StoredObject {
+            workflow_id: workflow_id.clone(),
+            object_id: StorageRecordId::new("obj-1").expect("object id"),
+            class: ObjectClass::SanitizedHistory,
+            storage_key,
+            byte_length: serialized.len() as u64,
+            sha256,
+            media_type: "application/json".to_owned(),
+            created_at: WorkflowTimestamp::from_unix_seconds(1_700_000_000),
+        };
+        let checkpoint = HistoryCheckpoint {
+            workflow_id: workflow_id.clone(),
+            sequence: crate::repositories::HistorySequence::new(1),
+            object: object.clone(),
+            model_version: "model-1".to_owned(),
+            prompt_version: "prompt-1".to_owned(),
+            created_at: object.created_at,
+        };
+        // Reconstruct the SanitizedHistory from the serialized bytes for
+        // the coordinator call. In production the producer holds the
+        // original object; here we serialize a fresh one to prove the
+        // coordinator's hash/length verification.
+        let history = SanitizedHistory::new(vec![(SanitizedRole::User, "hello".to_owned())], &[])
+            .expect("valid history");
+        (checkpoint, history)
+    }
+
     // ── Tests ───────────────────────────────────────────────────────
 
     #[tokio::test]
@@ -480,49 +547,39 @@ mod tests {
 
     #[tokio::test]
     async fn publish_history_puts_then_appends_on_success() {
-        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"hello"}]}"#;
-        let object = make_object(ObjectClass::SanitizedHistory, body);
-        let checkpoint = HistoryCheckpoint {
-            workflow_id: object.workflow_id.clone(),
-            sequence: crate::repositories::HistorySequence::new(1),
-            object: object.clone(),
-            model_version: "model-1".to_owned(),
-            prompt_version: "prompt-1".to_owned(),
-            created_at: object.created_at,
-        };
+        let history = SanitizedHistory::new(vec![(SanitizedRole::User, "hello".to_owned())], &[])
+            .expect("valid history");
+        let serialized = history.serialize().expect("should serialize");
+        let (checkpoint, history_clone) = make_history_checkpoint(&serialized);
+
         let store = FakeObjectStore::with(PutBehavior::Success);
-        let history = FakeHistoryRepo::with(vec![ConditionalWriteOutcome::Committed]);
+        let history_repo = FakeHistoryRepo::with(vec![ConditionalWriteOutcome::Committed]);
         let coordinator =
-            PublicationCoordinator::new(store, FakeMetadataRepo::noop(), history.clone());
+            PublicationCoordinator::new(store, FakeMetadataRepo::noop(), history_repo.clone());
 
         let outcome = coordinator
-            .publish_history(&checkpoint, body)
+            .publish_history(&checkpoint, &history_clone)
             .await
             .expect("history path should commit");
 
         assert_eq!(outcome, ConditionalWriteOutcome::Committed);
-        assert_eq!(history.appended_count(), 1);
+        assert_eq!(history_repo.appended_count(), 1);
     }
 
     #[tokio::test]
     async fn publish_history_fails_closed_when_object_not_confirmed() {
-        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[]}"#;
-        let object = make_object(ObjectClass::SanitizedHistory, body);
-        let checkpoint = HistoryCheckpoint {
-            workflow_id: object.workflow_id.clone(),
-            sequence: crate::repositories::HistorySequence::new(1),
-            object: object.clone(),
-            model_version: "model-1".to_owned(),
-            prompt_version: "prompt-1".to_owned(),
-            created_at: object.created_at,
-        };
+        let history = SanitizedHistory::new(vec![(SanitizedRole::User, "hello".to_owned())], &[])
+            .expect("valid history");
+        let serialized = history.serialize().expect("should serialize");
+        let (checkpoint, history_clone) = make_history_checkpoint(&serialized);
+
         let store = FakeObjectStore::with(PutBehavior::Ambiguous);
-        let history = FakeHistoryRepo::with(vec![ConditionalWriteOutcome::Committed]);
+        let history_repo = FakeHistoryRepo::with(vec![ConditionalWriteOutcome::Committed]);
         let coordinator =
-            PublicationCoordinator::new(store, FakeMetadataRepo::noop(), history.clone());
+            PublicationCoordinator::new(store, FakeMetadataRepo::noop(), history_repo.clone());
 
         let error = coordinator
-            .publish_history(&checkpoint, body)
+            .publish_history(&checkpoint, &history_clone)
             .await
             .expect_err("should fail closed");
 
@@ -530,7 +587,33 @@ mod tests {
             matches!(error, PublicationError::ObjectNotConfirmed { .. }),
             "expected ObjectNotConfirmed, got {error:?}"
         );
-        assert_eq!(history.appended_count(), 0);
+        assert_eq!(history_repo.appended_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn publish_history_rejects_checkpoint_with_mismatched_hash() {
+        let history = SanitizedHistory::new(vec![(SanitizedRole::User, "hello".to_owned())], &[])
+            .expect("valid history");
+        let serialized = history.serialize().expect("should serialize");
+        let (mut checkpoint, history_clone) = make_history_checkpoint(&serialized);
+        // Corrupt the hash so it doesn't match the serialized bytes.
+        checkpoint.object.sha256 = [0xff; 32];
+
+        let store = FakeObjectStore::with(PutBehavior::Success);
+        let history_repo = FakeHistoryRepo::with(vec![ConditionalWriteOutcome::Committed]);
+        let coordinator =
+            PublicationCoordinator::new(store, FakeMetadataRepo::noop(), history_repo.clone());
+
+        let error = coordinator
+            .publish_history(&checkpoint, &history_clone)
+            .await
+            .expect_err("mismatched hash should be rejected");
+
+        assert!(
+            matches!(error, PublicationError::HistorySerializationMismatch),
+            "expected HistorySerializationMismatch, got {error:?}"
+        );
+        assert_eq!(history_repo.appended_count(), 0);
     }
 
     // ── History fake ────────────────────────────────────────────────
