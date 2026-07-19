@@ -172,12 +172,12 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 ### Phase 4: Secure Intake, AI, and Confirmation
 
-- [ ] Task 26: Implement attachment collection and limits
-- [ ] Task 27: Implement secure image and PDF normalization
-- [ ] Task 28: Add CSV, Word, and Excel normalization safely
-- [ ] Task 29: Implement the Pi session factory and safety boundary
-- [ ] Task 30: Implement schema-validated extraction and history rehydration
-- [ ] Task 31: Implement resumable clarification, preview, and confirmation
+- [x] Task 26: Implement attachment collection and limits
+- [x] Task 27: Implement secure image and PDF normalization
+- [x] Task 28: Add CSV, Word, and Excel normalization safely
+- [x] Task 29: Implement the Pi session factory and safety boundary
+- [x] Task 30: Implement schema-validated extraction and history rehydration
+- [x] Task 31: Implement resumable clarification, preview, and confirmation
 
 ### Checkpoint: Read-Only Workflow Slice
 
