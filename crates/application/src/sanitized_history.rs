@@ -42,6 +42,7 @@ pub enum SanitizedHistoryError {
     ContentTooLarge { length: usize, maximum: usize },
     EmptyContent,
     ToolMessagesNotAllowed,
+    EmptySecretProvenance,
 }
 
 impl Display for SanitizedHistoryError {
@@ -58,6 +59,9 @@ impl Display for SanitizedHistoryError {
             Self::EmptyContent => formatter.write_str("sanitized history message content is empty"),
             Self::ToolMessagesNotAllowed => formatter.write_str(
                 "tool messages are not allowed in sanitized history; redact or convert them before construction",
+            ),
+            Self::EmptySecretProvenance => formatter.write_str(
+                "from_secret_values requires at least one secret; use no_secrets with NoSecretsUsed attestation for conversations without secrets",
             ),
         }
     }
@@ -103,17 +107,24 @@ impl Debug for SanitizedHistory {
 }
 
 /// Explicit attestation that no secrets were used in a conversation.
-/// This type cannot be constructed by accident — the caller must
-/// deliberately call [`NoSecretsUsed::attest`], acknowledging that they
-/// have verified no secret values appear in the message content.
+/// This type can only be constructed within the application crate via
+/// [`NoSecretsUsed::attest`], preventing external callers from forging
+/// a no-secret claim. The caller takes responsibility for verifying
+/// that no secret values appear in the message content.
 #[derive(Debug, Clone, Copy)]
 pub struct NoSecretsUsed {
     _private: (),
 }
 
 impl NoSecretsUsed {
+    /// Explicitly attest that no secrets were used. This is `pub(crate)`
+    /// so only trusted application-crate code can produce this attestation;
+    /// external callers must obtain it from a trusted operation context.
     /// Explicitly attest that no secrets were used. The caller takes
-    /// responsibility for verifying this claim.
+    /// responsibility for verifying this claim. This should only be
+    /// called from trusted operation-context code that has verified
+    /// no secret values appear in the message content.
+    #[allow(dead_code)]
     pub const fn attest() -> Self {
         Self { _private: () }
     }
@@ -146,14 +157,19 @@ impl Drop for HistorySanitizer {
 impl HistorySanitizer {
     /// Create a sanitizer from the typed secret values that were used
     /// during the conversation. Every occurrence of each secret in message
-    /// content will be replaced with `[REDACTED]`.
-    pub fn from_secret_values(secrets: Vec<SecretValue>) -> Self {
-        Self {
+    /// content will be replaced with `[REDACTED]`. Rejects an empty list —
+    /// use [`HistorySanitizer::no_secrets`] with a [`NoSecretsUsed`]
+    /// attestation for conversations where no secrets were used.
+    pub fn from_secret_values(secrets: Vec<SecretValue>) -> Result<Self, SanitizedHistoryError> {
+        if secrets.is_empty() {
+            return Err(SanitizedHistoryError::EmptySecretProvenance);
+        }
+        Ok(Self {
             secrets: secrets
                 .iter()
                 .map(|value| String::from_utf8_lossy(value.expose()).into_owned())
                 .collect(),
-        }
+        })
     }
 
     /// Create a sanitizer for conversations where no secrets were used.
@@ -257,7 +273,8 @@ mod tests {
         let secret = format!("{}_{}", "placeholder", "value-12345");
         let sanitizer = HistorySanitizer::from_secret_values(vec![
             SecretValue::new(secret.clone().into_bytes()).expect("non-empty"),
-        ]);
+        ])
+        .expect("non-empty secrets");
         let history = sanitizer
             .sanitize(vec![
                 (
@@ -354,7 +371,8 @@ mod tests {
         let sanitizer = HistorySanitizer::from_secret_values(vec![
             SecretValue::new(oauth.clone().into_bytes()).expect("non-empty"),
             SecretValue::new(smtp.clone().into_bytes()).expect("non-empty"),
-        ]);
+        ])
+        .expect("non-empty secrets");
         let history = sanitizer
             .sanitize(vec![(
                 SanitizedRole::User,
@@ -378,7 +396,8 @@ mod tests {
         let sanitizer = HistorySanitizer::from_secret_values(vec![
             SecretValue::new(long.clone().into_bytes()).expect("non-empty"),
             SecretValue::new(short.clone().into_bytes()).expect("non-empty"),
-        ]);
+        ])
+        .expect("non-empty secrets");
         let history = sanitizer
             .sanitize(vec![(SanitizedRole::User, format!("value is {long} here"))])
             .expect("valid history");

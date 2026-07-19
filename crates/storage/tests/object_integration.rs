@@ -195,7 +195,9 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
     };
     assert!(matches!(
         store.put_history(&unsafe_history, &unsafe_sanitized).await,
-        Err(S3Error::Validation(S3ValidationError::CredentialKeyPresent))
+        Err(S3Error::Validation(
+            S3ValidationError::CredentialValueMarker
+        ))
     ));
 
     let ssm_client = ssm_client();
