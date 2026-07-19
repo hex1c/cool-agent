@@ -722,14 +722,14 @@ invoke the tested Telegram and OAuth application paths without domain logic.
 
 **Acceptance criteria:**
 
-- [ ] Handlers return bounded, typed HTTP responses for success and failure.
-- [ ] Webhook acknowledgment does not wait on long-running workflow work.
-- [ ] OAuth callback responses and logs contain no tokens or secret values.
+- [x] Handlers return bounded, typed HTTP responses for success and failure.
+- [x] Webhook acknowledgment does not wait on long-running workflow work.
+- [x] OAuth callback responses and logs contain no tokens or secret values.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p webhook-function -p oauth-function`
-- [ ] Local invoke succeeds for recorded webhook and OAuth fixtures.
+- [x] Tests pass: `cargo test -p webhook-function -p oauth-function`
+- [x] Local invoke succeeds for recorded webhook and OAuth fixtures.
 
 **Dependencies:** Tasks 3, 22-24
 
