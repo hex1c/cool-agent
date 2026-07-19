@@ -136,7 +136,7 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
     let link = store.presign_artifact(&artifact).await?;
     assert!(link.as_str().contains("X-Amz-Expires=900"));
 
-    let history_bytes = br#"{"messages":[{"role":"user","content":"hello"}]}"#;
+    let history_bytes = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"hello"}]}"#;
     let history = object(
         &workflow_id,
         "history-1",
@@ -148,7 +148,7 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
     store.put(&history, history_bytes).await?;
     assert_eq!(store.get(&history).await?, history_bytes);
 
-    let unsafe_history_bytes = br#"{"refresh_token":"must-not-persist"}"#;
+    let unsafe_history_bytes = br#"{"refreshToken":"must-not-persist"}"#;
     let unsafe_history = object(
         &workflow_id,
         "history-2",

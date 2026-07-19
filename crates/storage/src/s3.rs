@@ -7,6 +7,7 @@ use application::ports::{
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::ServerSideEncryption;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::dynamodb::sha256_to_hex;
@@ -19,6 +20,9 @@ pub const PRESIGN_MIN_TTL_SECONDS: u32 = 1;
 pub const PRESIGN_MAX_TTL_SECONDS: u32 = 604_800;
 const MAX_SANITIZED_HISTORY_DEPTH: usize = 32;
 const MAX_SANITIZED_HISTORY_CONTAINER_ITEMS: usize = 10_000;
+const MAX_SANITIZED_HISTORY_MESSAGES: usize = 1_000;
+const MAX_SANITIZED_HISTORY_CONTENT_BYTES: usize = 65_536;
+const SANITIZED_HISTORY_SCHEMA_VERSION: &str = "novus.sanitized-history.v1";
 
 // ── validation errors ──────────────────────────────────────────────
 
@@ -54,6 +58,9 @@ pub enum S3ValidationError {
     ContentLengthUnavailable,
     NotJsonMediaType,
     InvalidJson,
+    InvalidHistorySchema,
+    HistoryMessageLimitExceeded,
+    HistoryContentTooLarge,
     HistoryNestingTooDeep,
     HistoryContainerTooLarge,
     CredentialKeyPresent,
@@ -98,6 +105,15 @@ impl Display for S3ValidationError {
                 f.write_str("SanitizedHistory media type must be application/json")
             }
             Self::InvalidJson => f.write_str("SanitizedHistory body is not valid JSON"),
+            Self::InvalidHistorySchema => {
+                f.write_str("SanitizedHistory body does not match the versioned schema")
+            }
+            Self::HistoryMessageLimitExceeded => {
+                f.write_str("SanitizedHistory contains too many messages")
+            }
+            Self::HistoryContentTooLarge => {
+                f.write_str("SanitizedHistory message content exceeds the configured bound")
+            }
             Self::HistoryNestingTooDeep => {
                 f.write_str("SanitizedHistory nesting exceeds the configured bound")
             }
@@ -373,6 +389,30 @@ const CREDENTIAL_VALUE_MARKERS: &[&str] = &[
     "smtp://",
 ];
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SanitizedHistoryDocument {
+    schema_version: String,
+    messages: Vec<SanitizedHistoryMessage>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SanitizedHistoryMessage {
+    #[serde(rename = "role")]
+    _role: SanitizedHistoryRole,
+    content: String,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum SanitizedHistoryRole {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
 fn validate_sanitized_history(body: &[u8], limit: u64) -> Result<(), S3ValidationError> {
     if body.len() as u64 > limit {
         return Err(S3ValidationError::ClassLimitExceeded {
@@ -386,6 +426,19 @@ fn validate_sanitized_history(body: &[u8], limit: u64) -> Result<(), S3Validatio
         serde_json::from_slice(body).map_err(|_| S3ValidationError::InvalidJson)?;
 
     scan_json_for_credentials(&value, 0)?;
+    let document: SanitizedHistoryDocument =
+        serde_json::from_value(value).map_err(|_| S3ValidationError::InvalidHistorySchema)?;
+    if document.schema_version != SANITIZED_HISTORY_SCHEMA_VERSION {
+        return Err(S3ValidationError::InvalidHistorySchema);
+    }
+    if document.messages.len() > MAX_SANITIZED_HISTORY_MESSAGES {
+        return Err(S3ValidationError::HistoryMessageLimitExceeded);
+    }
+    for message in document.messages {
+        if message.content.len() > MAX_SANITIZED_HISTORY_CONTENT_BYTES {
+            return Err(S3ValidationError::HistoryContentTooLarge);
+        }
+    }
 
     Ok(())
 }
@@ -427,7 +480,7 @@ fn scan_json_for_credentials(
 }
 
 fn is_credential_bearing_key(key: &str) -> bool {
-    let normalized = key.to_ascii_lowercase().replace('-', "_");
+    let normalized = normalize_json_key(key);
     CREDENTIAL_BEARING_KEYS.contains(&normalized.as_str())
         || normalized.starts_with("x_amz_")
         || normalized.ends_with("_secret")
@@ -435,6 +488,30 @@ fn is_credential_bearing_key(key: &str) -> bool {
         || normalized.ends_with("_credential")
         || normalized.ends_with("_token")
         || normalized.contains("presigned")
+}
+
+fn normalize_json_key(key: &str) -> String {
+    let mut normalized = String::with_capacity(key.len());
+    let mut previous_was_lowercase_or_digit = false;
+    for character in key.chars() {
+        if matches!(character, '-' | ' ' | '.') {
+            if !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            previous_was_lowercase_or_digit = false;
+        } else if character.is_ascii_uppercase() {
+            if previous_was_lowercase_or_digit && !normalized.ends_with('_') {
+                normalized.push('_');
+            }
+            normalized.push(character.to_ascii_lowercase());
+            previous_was_lowercase_or_digit = false;
+        } else {
+            normalized.push(character.to_ascii_lowercase());
+            previous_was_lowercase_or_digit =
+                character.is_ascii_lowercase() || character.is_ascii_digit();
+        }
+    }
+    normalized
 }
 
 fn contains_credential_value(value: &str) -> bool {
@@ -784,7 +861,7 @@ mod tests {
             Err(S3Error::Validation(S3ValidationError::BodyHashMismatch))
         ));
 
-        let unsafe_history = br#"{"refresh_token":"sensitive"}"#;
+        let unsafe_history = br#"{"refreshToken":"sensitive"}"#;
         let history = make_object(
             &workflow_id,
             ObjectClass::SanitizedHistory,
@@ -858,12 +935,17 @@ mod tests {
             Err(S3ValidationError::CredentialKeyPresent)
         ));
 
-        // case-insensitive
-        let body3 = br#"{"data": {"ACCESS_KEY": "val"}}"#;
-        assert!(matches!(
-            validate_sanitized_history(body3, 1024),
-            Err(S3ValidationError::CredentialKeyPresent)
-        ));
+        for body in [
+            br#"{"data":{"ACCESS_KEY":"val"}}"#.as_slice(),
+            br#"{"refreshToken":"val"}"#.as_slice(),
+            br#"{"clientSecret":"val"}"#.as_slice(),
+            br#"{"smtpPassword":"val"}"#.as_slice(),
+        ] {
+            assert!(matches!(
+                validate_sanitized_history(body, 1024),
+                Err(S3ValidationError::CredentialKeyPresent)
+            ));
+        }
     }
 
     #[test]
@@ -889,8 +971,52 @@ mod tests {
 
     #[test]
     fn sanitized_history_accepts_clean_json() {
-        let body = br#"{"msg": "the report was presigned; x-amz-request-id was documented", "nested": {"key": "value"}, "arr": [1, 2, 3], "token_count": 12}"#;
+        let body = br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[{"role":"user","content":"the report was presigned; x-amz-request-id was documented"},{"role":"assistant","content":"hello"}]}"#;
         validate_sanitized_history(body, 1024).expect("clean JSON should pass");
+    }
+
+    #[test]
+    fn sanitized_history_rejects_unknown_fields_and_schema_versions() {
+        let unknown =
+            br#"{"schemaVersion":"novus.sanitized-history.v1","messages":[],"metadata":{}}"#;
+        assert!(matches!(
+            validate_sanitized_history(unknown, 1024),
+            Err(S3ValidationError::InvalidHistorySchema)
+        ));
+        let wrong_version = br#"{"schemaVersion":"novus.sanitized-history.v2","messages":[]}"#;
+        assert!(matches!(
+            validate_sanitized_history(wrong_version, 1024),
+            Err(S3ValidationError::InvalidHistorySchema)
+        ));
+    }
+
+    #[test]
+    fn sanitized_history_rejects_message_and_content_limits() {
+        let messages = (0..=MAX_SANITIZED_HISTORY_MESSAGES)
+            .map(|_| serde_json::json!({ "role": "user", "content": "safe" }))
+            .collect::<Vec<_>>();
+        let too_many = serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": SANITIZED_HISTORY_SCHEMA_VERSION,
+            "messages": messages,
+        }))
+        .expect("message fixture should serialize");
+        assert!(matches!(
+            validate_sanitized_history(&too_many, 1_000_000),
+            Err(S3ValidationError::HistoryMessageLimitExceeded)
+        ));
+
+        let too_large = serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": SANITIZED_HISTORY_SCHEMA_VERSION,
+            "messages": [{
+                "role": "user",
+                "content": "x".repeat(MAX_SANITIZED_HISTORY_CONTENT_BYTES + 1),
+            }],
+        }))
+        .expect("content fixture should serialize");
+        assert!(matches!(
+            validate_sanitized_history(&too_large, 1_000_000),
+            Err(S3ValidationError::HistoryContentTooLarge)
+        ));
     }
 
     #[test]
