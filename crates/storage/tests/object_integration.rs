@@ -2,8 +2,8 @@
 #![allow(clippy::expect_used)]
 
 use application::ports::{
-    ArtifactLinkSigner, HistoryStore, ObjectClass, ObjectStore, SecretProvider, SecretReference,
-    StorageKey, StorageRecordId, StoredObject,
+    ArtifactLinkSigner, HistoryStore, ObjectClass, ObjectStore, StorageKey, StorageRecordId,
+    StoredObject,
 };
 use aws_sdk_s3::config::{Credentials as S3Credentials, Region as S3Region};
 use aws_sdk_ssm::config::{Credentials as SsmCredentials, Region as SsmRegion};
@@ -140,14 +140,28 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
     // History: create a SanitizedHistory via the provenance-safe
     // HistorySanitizer, serialize it, and build the StoredObject from
     // the serialized bytes so hash/length match.
-    use application::ports::SecretValue;
+    use application::ports::{SecretReference, resolve_secret};
     use application::sanitized_history::{HistorySanitizer, SanitizedRole};
-    let safe_history = HistorySanitizer::from_secret_values(vec![
-        SecretValue::new(b"unused-secret".to_vec()).expect("non-empty"),
-    ])
-    .expect("non-empty secrets")
-    .sanitize(vec![(SanitizedRole::User, "hello".to_owned())])
-    .expect("valid history");
+    // Resolve a real secret through the provenance-safe path to obtain
+    // a SecretValue for the HistorySanitizer.
+    let ssm_for_history = ssm_client();
+    let history_secret_name = format!("/novus/development/integration/{unique}/hist-secret");
+    ssm_for_history
+        .put_parameter()
+        .name(&history_secret_name)
+        .r#type(ParameterType::SecureString)
+        .value("history-redaction-key")
+        .send()
+        .await?;
+    let history_secret = resolve_secret(
+        &SsmSecretProvider::new(ssm_for_history.clone(), "development")?,
+        &SecretReference::new(&history_secret_name)?,
+    )
+    .await?;
+    let safe_history = HistorySanitizer::from_secret_values(vec![history_secret])
+        .expect("non-empty secrets")
+        .sanitize(vec![(SanitizedRole::User, "hello".to_owned())])
+        .expect("valid history");
     let history_bytes = safe_history.serialize().expect("should serialize");
     use sha2::{Digest, Sha256};
     let history_hash = Sha256::digest(&history_bytes);
@@ -175,7 +189,11 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
     // Unsafe history: credential marker in content that sanitizer
     // didn't redact (defense-in-depth).
     let unsafe_sanitized = HistorySanitizer::from_secret_values(vec![
-        SecretValue::new(b"unused-secret".to_vec()).expect("non-empty"),
+        resolve_secret(
+            &SsmSecretProvider::new(ssm_for_history.clone(), "development")?,
+            &SecretReference::new(&history_secret_name)?,
+        )
+        .await?,
     ])
     .expect("non-empty secrets")
     .sanitize(vec![(
@@ -220,7 +238,7 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
         .await?;
     let provider = SsmSecretProvider::new(ssm_client.clone(), "development")?;
     let secure_reference = SecretReference::new(&secure_name)?;
-    let secret = provider.get_secret(&secure_reference).await?;
+    let secret = resolve_secret(&provider, &secure_reference).await?;
     assert_eq!(secret.expose(), b"integration-secret-value");
     assert_eq!(format!("{secret:?}"), "SecretValue([REDACTED])");
 
@@ -234,17 +252,19 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
         .await?;
     let plain_reference = SecretReference::new(&plain_name)?;
     assert!(matches!(
-        provider.get_secret(&plain_reference).await,
-        Err(SecretProviderError::Validation(
-            SecretProviderValidationError::ParameterNotSecureString
+        resolve_secret(&provider, &plain_reference).await,
+        Err(application::ports::SecretResolutionError::Provider(
+            SecretProviderError::Validation(
+                SecretProviderValidationError::ParameterNotSecureString
+            )
         ))
     ));
     let cross_environment =
         SecretReference::new(format!("/novus/staging/integration/{unique}/secret"))?;
     assert!(matches!(
-        provider.get_secret(&cross_environment).await,
-        Err(SecretProviderError::Validation(
-            SecretProviderValidationError::ReferenceOutOfScope
+        resolve_secret(&provider, &cross_environment).await,
+        Err(application::ports::SecretResolutionError::Provider(
+            SecretProviderError::Validation(SecretProviderValidationError::ReferenceOutOfScope)
         ))
     ));
 
@@ -265,6 +285,7 @@ async fn s3_objects_presigning_and_secure_parameters_round_trip()
         .delete_parameters()
         .names(secure_name)
         .names(plain_name)
+        .names(&history_secret_name)
         .send()
         .await?;
 

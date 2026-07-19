@@ -4,8 +4,8 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use application::ports::{
-    ObjectClass, PageToken, PortValueError, PresignedObjectLink, SecretReference, SecretValue,
-    StorageKey, StorageRecordId, StoredObject,
+    ObjectClass, PageToken, PortValueError, PresignedObjectLink, StorageKey, StorageRecordId,
+    StoredObject,
 };
 use application::repositories::{
     HistoryCheckpoint, HistorySequence, InvoiceMonth, MAX_PAGE_SIZE, PageRequest,
@@ -133,10 +133,27 @@ fn object_contract_enforces_environment_bound_prefix_classes() {
     assert!(StorageKey::new("raw/").is_err());
 }
 
-#[test]
-fn secret_values_are_redacted_and_references_are_environment_scoped() {
-    let secret = SecretValue::new(b"sensitive-test-value".to_vec())
-        .expect("non-empty secret should be accepted");
+#[tokio::test]
+async fn secret_values_are_redacted_and_references_are_environment_scoped() {
+    use application::ports::{SecretProvider, SecretReference, resolve_secret};
+
+    struct MockProvider;
+    impl SecretProvider for MockProvider {
+        type Error = std::convert::Infallible;
+        async fn get_secret_bytes(
+            &self,
+            _reference: &SecretReference,
+        ) -> Result<Vec<u8>, Self::Error> {
+            Ok(b"sensitive-test-value".to_vec())
+        }
+    }
+
+    let secret = resolve_secret(
+        &MockProvider,
+        &SecretReference::new("/novus/test/mock").expect("valid ref"),
+    )
+    .await
+    .expect("should resolve");
     assert_eq!(format!("{secret:?}"), "SecretValue([REDACTED])");
     assert_eq!(secret.expose(), b"sensitive-test-value");
 

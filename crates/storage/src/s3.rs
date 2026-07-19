@@ -1028,9 +1028,27 @@ mod tests {
         // marker that the sanitizer did not redact (defense-in-depth).
         // Build the StoredObject from the serialized bytes so hash/length
         // match, then verify the storage-layer regex catches it.
+        // Use a mock SecretProvider to resolve a SecretValue through the
+        // provenance-safe resolve_secret path, then construct a
+        // HistorySanitizer.
+        use application::ports::{SecretProvider, SecretReference, resolve_secret};
+        struct MockSecretProvider;
+        impl SecretProvider for MockSecretProvider {
+            type Error = std::convert::Infallible;
+            async fn get_secret_bytes(
+                &self,
+                _reference: &SecretReference,
+            ) -> Result<Vec<u8>, Self::Error> {
+                Ok(b"mock-secret".to_vec())
+            }
+        }
+        let mock_ref = SecretReference::new("/novus/test/mock").expect("valid ref");
+        let secret_value = resolve_secret(&MockSecretProvider, &mock_ref)
+            .await
+            .expect("should resolve");
         let unsafe_sanitized =
             application::sanitized_history::HistorySanitizer::from_secret_values(vec![
-                application::ports::SecretValue::new(b"unused-secret".to_vec()).expect("non-empty"),
+                secret_value,
             ])
             .expect("non-empty secrets")
             .sanitize(vec![(
