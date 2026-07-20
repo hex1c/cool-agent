@@ -107,6 +107,34 @@ impl PendingConfirmation {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
+impl PendingConfirmation {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        confirmation_id: ConfirmationId,
+        workflow_id: WorkflowId,
+        workflow_revision: WorkflowRevision,
+        owner: ParticipantId,
+        topic: TopicSessionId,
+        preview_digest: PreviewDigest,
+        mutation_target: MutationTargetFingerprint,
+        action: ConfirmationAction,
+        expires_at: WaitDeadline,
+    ) -> Self {
+        Self {
+            confirmation_id,
+            workflow_id,
+            workflow_revision,
+            owner,
+            topic,
+            preview_digest,
+            mutation_target,
+            action,
+            expires_at,
+        }
+    }
+}
+
 /// Topic-qualified Telegram message used to consume a confirmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -206,6 +234,27 @@ impl ConfirmationRecord {
         match self {
             Self::Pending(_) => None,
             Self::Consumed(consumed) => Some(consumed.resulting_workflow_revision),
+        }
+    }
+
+    pub const fn owner(&self) -> ParticipantId {
+        match self {
+            Self::Pending(p) => p.owner(),
+            Self::Consumed(c) => c.pending.owner(),
+        }
+    }
+
+    pub const fn preview_digest(&self) -> PreviewDigest {
+        match self {
+            Self::Pending(p) => p.preview_digest(),
+            Self::Consumed(c) => c.pending.preview_digest(),
+        }
+    }
+
+    pub const fn workflow_revision(&self) -> WorkflowRevision {
+        match self {
+            Self::Pending(p) => p.workflow_revision(),
+            Self::Consumed(c) => c.pending.workflow_revision(),
         }
     }
 
@@ -604,5 +653,27 @@ impl Workflow {
             confirmation,
             precondition,
         })
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl ConsumedConfirmation {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        pending: PendingConfirmation,
+        confirming_actor: ParticipantId,
+        membership_authorization: MembershipAuthorizationSource,
+        source: TopicMessageReference,
+        confirmed_at: WorkflowTimestamp,
+        resulting_workflow_revision: WorkflowRevision,
+    ) -> Self {
+        Self {
+            pending,
+            confirming_actor,
+            membership_authorization,
+            source,
+            confirmed_at,
+            resulting_workflow_revision,
+        }
     }
 }
