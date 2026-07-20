@@ -103,6 +103,33 @@ fn normal_case_renders_single_page() {
     assert!(joined_lower.contains("44840.00"));
     assert!(joined_lower.contains("amount in words"));
     assert!(joined_lower.contains("terms & conditions"));
+    // Row identity: each item's distinct data must appear (not just the last item).
+    assert!(
+        joined_lower.contains("implementation support"),
+        "second item description must appear (row identity)"
+    );
+    assert!(
+        joined_lower.contains("documentation handover"),
+        "third item description must appear (row identity)"
+    );
+    // HSN/SAC codes render per row.
+    assert!(
+        joined_lower.contains("998314"),
+        "first item HSN/SAC must appear"
+    );
+    assert!(
+        joined_lower.contains("998315"),
+        "second item HSN/SAC must appear"
+    );
+    // Unit and rate columns render.
+    assert!(joined_lower.contains("5000.00"), "unit rate must appear");
+    // Bank data renders (not company address).
+    assert!(joined_lower.contains("hdfc bank"), "bank name must appear");
+    assert!(
+        joined_lower.contains("50200012345678"),
+        "account number must appear"
+    );
+    assert!(joined_lower.contains("hdfc0001234"), "IFSC must appear");
     assert_eq!(doc.pages.len(), 1);
 }
 

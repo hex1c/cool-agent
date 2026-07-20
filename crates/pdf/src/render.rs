@@ -443,6 +443,8 @@ impl QuotationRenderer {
             COLOR_ACCENT_B,
             None,
         ));
+        // Title-strip text is white on the accent-filled strip for contrast.
+        let strip_text = Color::Rgb(Rgb::new(1.0, 1.0, 1.0, None));
 
         let mut cursor_y = layout.table_header_bottom + 2.0;
         let body_bottom = layout.table_body_bottom;
@@ -450,7 +452,14 @@ impl QuotationRenderer {
         for block in &page.blocks {
             match block {
                 Block::PageHeader { with_table_header } => {
-                    self.push_title_strip(&mut ops, doc, page_index, total_pages, &accent)?;
+                    self.push_title_strip(
+                        &mut ops,
+                        doc,
+                        page_index,
+                        total_pages,
+                        &accent,
+                        &strip_text,
+                    )?;
                     if page_index == 0 {
                         self.push_company_identity(&mut ops, doc, &primary)?;
                         self.push_quotation_metadata(&mut ops, doc, &primary)?;
@@ -515,6 +524,7 @@ impl QuotationRenderer {
         page_index: usize,
         total_pages: usize,
         accent: &Color,
+        text_color: &Color,
     ) -> Result<(), RenderError> {
         let layout = &self.layout;
         let strip = layout.region("title_strip")?;
@@ -543,7 +553,7 @@ impl QuotationRenderer {
             strip.y + 6.0,
             FONT_SIZE_TITLE,
             BuiltinFont::HelveticaBold,
-            accent,
+            text_color,
         );
         if let Some(copy_label) = &doc.meta.copy_label
             && !copy_label.is_empty()
@@ -556,7 +566,7 @@ impl QuotationRenderer {
                 strip.y + 6.0,
                 FONT_SIZE_BODY,
                 BuiltinFont::Helvetica,
-                accent,
+                text_color,
             );
         }
         // Every page repeats quotation number + date (rule 1).
@@ -574,7 +584,7 @@ impl QuotationRenderer {
             strip.y + 6.0,
             FONT_SIZE_BODY,
             BuiltinFont::Helvetica,
-            accent,
+            text_color,
         );
         Ok(())
     }
