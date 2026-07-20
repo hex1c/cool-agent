@@ -1,7 +1,5 @@
 //! Quotation PDF rendering using the approved layout contract.
 
-use std::fmt::Write as _;
-
 use printpdf::color::{Color, Rgb};
 use printpdf::font::BuiltinFont;
 use printpdf::graphics::{Line, LinePoint, Point, Rect};
@@ -16,9 +14,15 @@ use thiserror::Error;
 use crate::layout::{
     COLOR_ACCENT_B, COLOR_ACCENT_G, COLOR_ACCENT_R, COLOR_PRIMARY_B, COLOR_PRIMARY_G,
     COLOR_PRIMARY_R, FONT_SIZE_BODY, FONT_SIZE_TABLE_HEADER, FONT_SIZE_TERMS, FONT_SIZE_TITLE,
-    FONT_SIZE_TOTALS_BOLD, PAGE_HEIGHT_MM, PAGE_WIDTH_MM, QuotationLayout, Region, pt, pt_to_pdf_x,
+    FONT_SIZE_TOTALS_BOLD, PAGE_HEIGHT_MM, PAGE_WIDTH_MM, QuotationLayout, pt, pt_to_pdf_x,
     pt_to_pdf_y,
 };
+
+// Approximate average character width for Helvetica at a given size (in pt).
+// Helvetica's average glyph advance is ~0.5em.
+fn text_width_pt(s: &str, size: f32) -> f32 {
+    s.chars().count() as f32 * size * 0.5
+}
 
 // ---------------------------------------------------------------------------
 // Render data model (caller-supplied, pre-formatted strings)
@@ -27,6 +31,7 @@ use crate::layout::{
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct QuotationDocument {
     pub company: CompanyRenderData,
+    pub bank: BankRenderData,
     pub meta: QuotationMetaRenderData,
     pub customer: CustomerRenderData,
     pub line_items: Vec<LineItemRenderData>,
@@ -44,6 +49,16 @@ pub struct CompanyRenderData {
     pub contact: Vec<String>,
     pub logo_ref: Option<String>,
     pub signature_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct BankRenderData {
+    pub bank_name: String,
+    pub account_name: String,
+    pub account_number: String,
+    pub ifsc: String,
+    pub branch: Option<String>,
+    pub upi_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -116,10 +131,18 @@ pub enum RenderError {
 /// A logical block that occupies vertical space on a page.
 #[derive(Debug, Clone)]
 pub enum Block {
-    /// Continuation-page header: title strip + quotation number/date + table header.
-    ContinuationHeader,
-    /// A single line-item, already split into wrapped text lines.
-    ItemRow { lines: Vec<String>, amount: String },
+    /// Page header: title strip + quotation number/date + (optionally) table header.
+    /// Rendered on every page (rule 1). `with_table_header` is true on pages that
+    /// contain item rows.
+    PageHeader { with_table_header: bool },
+    /// A fragment of a line item. `is_continuation` fragments repeat sequence/HSN
+    /// context but do NOT repeat financial amounts (rule 4). Only the final
+    /// fragment (`is_continuation == false`) renders financial columns.
+    ItemRow {
+        item_index: usize,
+        lines: Vec<String>,
+        is_continuation: bool,
+    },
     /// Item/quantity footer.
     ItemFooter,
     /// Tax + total summary block (kept intact; rule 8).
@@ -128,16 +151,24 @@ pub enum Block {
     AmountInWords,
     /// Bank + signature panel (kept intact; rule 6).
     BankSignature,
-    /// Terms heading + terms lines.
+    /// A chunk of terms lines (terms paginate across pages; rule 7).
     Terms { lines: Vec<String> },
 }
 
 impl Block {
     /// Approximate height in points consumed by this block.
+    #[allow(dead_code)]
     fn height_pt(&self, layout: &QuotationLayout) -> f32 {
         let row_h = layout.minimum_row_line_height;
         match self {
-            Self::ContinuationHeader => layout.table_header_bottom - layout.table_header_top + 34.0,
+            Self::PageHeader { with_table_header } => {
+                let header = layout.table_header_bottom - layout.table_header_top;
+                24.0 + if *with_table_header {
+                    header + 6.0
+                } else {
+                    0.0
+                }
+            }
             Self::ItemRow { lines, .. } => row_h * (lines.len().max(1) as f32),
             Self::ItemFooter => 14.0,
             Self::Summary => 14.0 * (3.0 + layout.columns.len().min(4) as f32),
@@ -150,11 +181,6 @@ impl Block {
 
 #[derive(Debug, Clone)]
 pub struct PlannedPage {
-    /// Index of the first line item rendered on this page (None for summary-only pages).
-    pub start_item: Option<usize>,
-    /// One-past the last line item rendered on this page.
-    pub end_item: usize,
-    /// Blocks on this page in render order.
     pub blocks: Vec<Block>,
 }
 
@@ -188,10 +214,9 @@ impl QuotationRenderer {
         let body_top = layout.table_header_bottom + 2.0;
         let body_bottom = layout.table_body_bottom;
         let usable_per_page = body_bottom - body_top;
+        let terms_region = layout.region("terms")?;
+        let terms_height = terms_region.height;
         let footer_region = layout.region("footer")?;
-        // The financial summary tail is moved to its own page if it cannot fit on
-        // the last item page (handled after the loop); it does NOT gate every
-        // page break, so short quotations fill page 1 normally.
 
         // Wrap each item description into lines that fit the item column width.
         let item_col = layout.column_by_name("item");
@@ -205,88 +230,130 @@ impl QuotationRenderer {
         let mut pages: Vec<PlannedPage> = Vec::new();
         let mut current_blocks: Vec<Block> = Vec::new();
         let mut current_height = 0.0_f32;
-        let mut start_item: Option<usize> = None;
-        let mut idx = 0usize;
 
-        while idx < doc.line_items.len() {
-            let lines = wrapped
-                .get(idx)
-                .ok_or(RenderError::MissingRequiredField("wrapped item"))?
-                .clone();
-            let amount = doc
-                .line_items
-                .get(idx)
-                .ok_or(RenderError::MissingRequiredField("line item"))?
-                .amount
-                .clone();
-            let block = Block::ItemRow { lines, amount };
-            let h = block.height_pt(layout);
+        // Page 1 starts with a full header (title strip + company + metadata + table header).
+        // Continuation pages start with a compact header (title strip + table header).
+        // The header is added per-page below; here we only track item/tail blocks.
 
-            // Flush the page only when the next row would overflow the body region.
-            if current_height + h > usable_per_page && !current_blocks.is_empty() {
-                pages.push(PlannedPage {
-                    start_item,
-                    end_item: idx,
-                    blocks: std::mem::take(&mut current_blocks),
-                });
-                start_item = None;
-                current_height = 0.0;
+        for (idx, item_lines) in wrapped.iter().enumerate() {
+            let row_h = layout.minimum_row_line_height;
+            let full_height = row_h * (item_lines.len() as f32);
+
+            // Rule 4: if a single item exceeds a full page, split it at line boundaries.
+            // Each fragment consumes one page's worth of lines. Financial amounts appear
+            // only on the final fragment.
+            let max_lines_per_page = (usable_per_page / row_h).floor() as usize;
+            if max_lines_per_page == 0 {
+                // Degenerate layout: render the item as a single block regardless.
+                let block = Block::ItemRow {
+                    item_index: idx,
+                    lines: item_lines.clone(),
+                    is_continuation: false,
+                };
+                current_blocks.push(block);
+                current_height += full_height;
                 continue;
             }
 
-            if start_item.is_none() {
-                start_item = Some(idx);
+            if full_height > usable_per_page {
+                // Flush current page first.
+                if !current_blocks.is_empty() {
+                    pages.push(PlannedPage {
+                        blocks: std::mem::take(&mut current_blocks),
+                    });
+                    current_height = 0.0;
+                }
+                // Split the item across pages.
+                let chunks: Vec<Vec<String>> = item_lines
+                    .chunks(max_lines_per_page)
+                    .map(|c| c.to_vec())
+                    .collect();
+                for (frag_idx, chunk) in chunks.iter().enumerate() {
+                    let is_continuation = frag_idx < chunks.len() - 1;
+                    if !current_blocks.is_empty()
+                        && current_height + row_h * (chunk.len() as f32) > usable_per_page
+                    {
+                        pages.push(PlannedPage {
+                            blocks: std::mem::take(&mut current_blocks),
+                        });
+                        current_height = 0.0;
+                    }
+                    current_blocks.push(Block::ItemRow {
+                        item_index: idx,
+                        lines: chunk.clone(),
+                        is_continuation,
+                    });
+                    current_height += row_h * (chunk.len() as f32);
+                }
+                continue;
             }
-            current_blocks.push(block);
-            current_height += h;
-            idx += 1;
+
+            // Normal item: flush the page if the next row would overflow.
+            if current_height + full_height > usable_per_page && !current_blocks.is_empty() {
+                pages.push(PlannedPage {
+                    blocks: std::mem::take(&mut current_blocks),
+                });
+                current_height = 0.0;
+            }
+            current_blocks.push(Block::ItemRow {
+                item_index: idx,
+                lines: item_lines.clone(),
+                is_continuation: false,
+            });
+            current_height += full_height;
         }
 
-        // Flush remaining item blocks.
+        // Flush remaining item blocks before handling the financial summary tail.
         if !current_blocks.is_empty() {
             pages.push(PlannedPage {
-                start_item,
-                end_item: idx,
                 blocks: std::mem::take(&mut current_blocks),
             });
         }
 
         // Financial summary tail: item footer + summary + amount-in-words + bank + terms.
         // Rule 5/6/8: keep summary, amount-in-words, bank/signature intact; move as a unit.
-        // The tail occupies fixed regions BELOW the table on the same page, so it fits
-        // on page 1 for short quotations. It only needs its own page when the last
-        // item page is a full continuation page (items consumed the body region).
-        let terms_width = layout.region("terms")?.width - 4.0;
+        let terms_width = terms_region.width - 4.0;
         let terms_lines: Vec<String> = doc
             .terms
             .iter()
             .flat_map(|t| wrap_text(t, terms_width))
             .collect();
-        let tail: Vec<Block> = vec![
+        // Rule 7: terms paginate. Split terms lines into chunks that fit the terms region.
+        let terms_line_h = 9.36_f32;
+        let terms_heading_h = 18.0;
+        let max_terms_lines =
+            (((terms_height - terms_heading_h) / terms_line_h).floor() as usize).max(1);
+        let terms_chunks: Vec<Vec<String>> = if terms_lines.is_empty() {
+            vec![Vec::new()]
+        } else {
+            terms_lines
+                .chunks(max_terms_lines)
+                .map(|c| c.to_vec())
+                .collect()
+        };
+
+        let mut tail: Vec<Block> = vec![
             Block::ItemFooter,
             Block::Summary,
             Block::AmountInWords,
             Block::BankSignature,
-            Block::Terms { lines: terms_lines },
         ];
+        // First terms chunk goes in the tail; additional chunks become their own pages.
+        if let Some(first_terms) = terms_chunks.first() {
+            tail.push(Block::Terms {
+                lines: first_terms.clone(),
+            });
+        }
 
         if pages.is_empty() {
             // No items: a single page holds the empty table + tail.
-            pages.push(PlannedPage {
-                start_item: None,
-                end_item: 0,
-                blocks: tail,
-            });
+            pages.push(PlannedPage { blocks: tail });
         } else {
             // If the last page overflowed the body region with items, move the tail
             // to a fresh page; otherwise append it below the table on the last page.
             let last_overflowed = current_height > usable_per_page;
             if last_overflowed {
-                pages.push(PlannedPage {
-                    start_item: None,
-                    end_item: doc.line_items.len(),
-                    blocks: tail,
-                });
+                pages.push(PlannedPage { blocks: tail });
             } else {
                 let last = pages
                     .last_mut()
@@ -295,17 +362,31 @@ impl QuotationRenderer {
             }
         }
 
-        // Mark continuation pages: any page after the first that renders items.
-        // (The first page already has the full header via render; continuation pages
-        // get a ContinuationHeader block prepended.)
-        for page in pages.iter_mut().skip(1) {
-            if page.start_item.is_some() {
-                page.blocks.insert(0, Block::ContinuationHeader);
-            }
+        // Additional terms chunks go on their own continuation pages (rule 7).
+        for extra_terms in terms_chunks.iter().skip(1) {
+            pages.push(PlannedPage {
+                blocks: vec![Block::Terms {
+                    lines: extra_terms.clone(),
+                }],
+            });
+        }
+
+        // Prepend a PageHeader to every page (rule 1: every page repeats the title
+        // strip + quotation number/date). Pages with item rows also get the table header.
+        for page in pages.iter_mut() {
+            let has_items = page
+                .blocks
+                .iter()
+                .any(|b| matches!(b, Block::ItemRow { .. }));
+            page.blocks.insert(
+                0,
+                Block::PageHeader {
+                    with_table_header: has_items,
+                },
+            );
         }
 
         // Rule 9: total page count is now known for footer rendering.
-        // Suppress unused-warning for footer_region by using it in a no-op.
         let _ = footer_region;
 
         Ok(PagePlan { pages })
@@ -363,43 +444,41 @@ impl QuotationRenderer {
             None,
         ));
 
-        // Title strip + accent rectangle (page 1 full header; continuation pages
-        // render a compact header via the ContinuationHeader block).
-        let is_continuation = page_index > 0 && page.start_item.is_some();
-        if is_continuation {
-            self.push_title_strip(&mut ops, doc, page_index, total_pages, &accent)?;
-            self.push_table_header(&mut ops, &primary)?;
-        } else if page_index == 0 {
-            self.push_title_strip(&mut ops, doc, page_index, total_pages, &accent)?;
-            self.push_company_identity(&mut ops, doc, &primary)?;
-            self.push_quotation_metadata(&mut ops, doc, &primary)?;
-            self.push_customer_details(&mut ops, doc, &primary)?;
-            self.push_shipping_dispatch(&mut ops, doc, &primary)?;
-            self.push_table_header(&mut ops, &primary)?;
-        }
-
-        // Cursor for item rows starts just below the table header.
         let mut cursor_y = layout.table_header_bottom + 2.0;
         let body_bottom = layout.table_body_bottom;
 
         for block in &page.blocks {
             match block {
-                Block::ContinuationHeader => {
-                    // Already rendered above for continuation pages; skip.
-                }
-                Block::ItemRow { lines, amount } => {
-                    if cursor_y + layout.minimum_row_line_height > body_bottom {
-                        // Safety net: a row that would overflow the body region is still
-                        // rendered (financial data is never truncated) but flagged by
-                        // moving the cursor down so subsequent rows are visually below.
+                Block::PageHeader { with_table_header } => {
+                    self.push_title_strip(&mut ops, doc, page_index, total_pages, &accent)?;
+                    if page_index == 0 {
+                        self.push_company_identity(&mut ops, doc, &primary)?;
+                        self.push_quotation_metadata(&mut ops, doc, &primary)?;
+                        self.push_customer_details(&mut ops, doc, &primary)?;
+                        self.push_shipping_dispatch(&mut ops, doc, &primary)?;
                     }
+                    if *with_table_header {
+                        // Reset cursor below the table header.
+                        cursor_y = layout.table_header_bottom + 2.0;
+                        self.push_table_header(&mut ops, &primary)?;
+                    }
+                }
+                Block::ItemRow {
+                    item_index,
+                    lines,
+                    is_continuation,
+                } => {
+                    let item = doc
+                        .line_items
+                        .get(*item_index)
+                        .ok_or(RenderError::MissingRequiredField("line item"))?;
                     self.push_item_row(
                         &mut ops,
-                        doc,
-                        page,
-                        &mut cursor_y,
+                        item,
                         lines,
-                        amount,
+                        *is_continuation,
+                        &mut cursor_y,
+                        body_bottom,
                         &primary,
                     )?;
                 }
@@ -439,14 +518,13 @@ impl QuotationRenderer {
     ) -> Result<(), RenderError> {
         let layout = &self.layout;
         let strip = layout.region("title_strip")?;
-        // Accent rectangle behind the title.
         ops.push(Op::SetFillColor {
             col: accent.clone(),
         });
         ops.push(Op::DrawRectangle {
             rectangle: Rect {
                 x: pt(strip.x),
-                y: pt(crate::layout::PAGE_HEIGHT_PT - (strip.y + strip.height)),
+                y: pt(PAGE_HEIGHT_PT - (strip.y + strip.height)),
                 width: pt(strip.width),
                 height: pt(strip.height),
                 mode: None,
@@ -457,10 +535,11 @@ impl QuotationRenderer {
         ops.push(Op::RestoreGraphicsState);
 
         let title = "QUOTATION";
+        let title_w = text_width_pt(title, FONT_SIZE_TITLE);
         self.text(
             ops,
             title,
-            strip.x + strip.width / 2.0 - 40.0,
+            strip.x + (strip.width - title_w) / 2.0,
             strip.y + 6.0,
             FONT_SIZE_TITLE,
             BuiltinFont::HelveticaBold,
@@ -469,35 +548,34 @@ impl QuotationRenderer {
         if let Some(copy_label) = &doc.meta.copy_label
             && !copy_label.is_empty()
         {
+            let label_w = text_width_pt(copy_label, FONT_SIZE_BODY);
             self.text(
                 ops,
                 copy_label,
-                strip.x + strip.width - 60.0,
+                strip.x + strip.width - label_w - 4.0,
                 strip.y + 6.0,
                 FONT_SIZE_BODY,
                 BuiltinFont::Helvetica,
                 accent,
             );
         }
-        // Continuation pages repeat quotation number + date (rule 1).
-        if page_index > 0 {
-            let label = format!(
-                "{}  |  {}  |  Page {} of {}",
-                doc.meta.quotation_number,
-                doc.meta.quotation_date,
-                page_index + 1,
-                total_pages
-            );
-            self.text(
-                ops,
-                &label,
-                strip.x + 4.0,
-                strip.y + 6.0,
-                FONT_SIZE_BODY,
-                BuiltinFont::Helvetica,
-                accent,
-            );
-        }
+        // Every page repeats quotation number + date (rule 1).
+        let label = format!(
+            "{}  |  {}  |  Page {} of {}",
+            doc.meta.quotation_number,
+            doc.meta.quotation_date,
+            page_index + 1,
+            total_pages
+        );
+        self.text(
+            ops,
+            &label,
+            strip.x + 4.0,
+            strip.y + 6.0,
+            FONT_SIZE_BODY,
+            BuiltinFont::Helvetica,
+            accent,
+        );
         Ok(())
     }
 
@@ -558,7 +636,6 @@ impl QuotationRenderer {
             );
             y += 10.0;
         }
-        // Logo slot (labeled rectangle, no image embedding).
         if let Some(logo) = &doc.company.logo_ref
             && !logo.is_empty()
         {
@@ -707,7 +784,24 @@ impl QuotationRenderer {
         if let Some(origin) = &doc.customer.dispatch_origin
             && !origin.is_empty()
         {
-            write_label(ops, "Dispatch: ", origin, region.x, y, primary, self);
+            self.text(
+                ops,
+                "Dispatch:",
+                region.x,
+                y,
+                FONT_SIZE_BODY,
+                BuiltinFont::HelveticaBold,
+                primary,
+            );
+            self.text(
+                ops,
+                origin,
+                region.x + 60.0,
+                y,
+                FONT_SIZE_BODY,
+                BuiltinFont::Helvetica,
+                primary,
+            );
         }
         Ok(())
     }
@@ -727,11 +821,7 @@ impl QuotationRenderer {
         ];
         for (name, label) in &headers {
             if let Some(col) = layout.column_by_name(name) {
-                let x = match col.alignment.as_str() {
-                    "right" => col.right - 2.0,
-                    "center" => (col.left + col.right) / 2.0 - 12.0,
-                    _ => col.left + 2.0,
-                };
+                let x = self.align_x(col, label, FONT_SIZE_TABLE_HEADER);
                 self.text(
                     ops,
                     label,
@@ -743,34 +833,28 @@ impl QuotationRenderer {
                 );
             }
         }
-        // Header underline.
         ops.push(Op::SetOutlineColor {
             col: primary.clone(),
         });
         ops.push(Op::SetOutlineThickness { pt: pt(0.5) });
+        let left_x = layout
+            .column_by_name("sequence")
+            .map(|c| c.left)
+            .unwrap_or(24.0);
+        let right_x = layout
+            .column_by_name("amount")
+            .map(|c| c.right)
+            .unwrap_or(571.28);
         ops.push(Op::DrawLine {
             line: Line {
                 points: vec![
                     LinePoint {
-                        p: Point::new(
-                            pt_to_pdf_x(
-                                layout
-                                    .column_by_name("sequence")
-                                    .map(|c| c.left)
-                                    .unwrap_or(24.0),
-                            ),
-                            pt_to_pdf_y(layout.table_header_bottom),
-                        ),
+                        p: Point::new(pt_to_pdf_x(left_x), pt_to_pdf_y(layout.table_header_bottom)),
                         bezier: false,
                     },
                     LinePoint {
                         p: Point::new(
-                            pt_to_pdf_x(
-                                layout
-                                    .column_by_name("amount")
-                                    .map(|c| c.right)
-                                    .unwrap_or(571.28),
-                            ),
+                            pt_to_pdf_x(right_x),
                             pt_to_pdf_y(layout.table_header_bottom),
                         ),
                         bezier: false,
@@ -786,24 +870,17 @@ impl QuotationRenderer {
     fn push_item_row(
         &self,
         ops: &mut Vec<Op>,
-        doc: &QuotationDocument,
-        page: &PlannedPage,
-        cursor_y: &mut f32,
+        item: &LineItemRenderData,
         lines: &[String],
-        amount: &str,
+        is_continuation: bool,
+        cursor_y: &mut f32,
+        _body_bottom: f32,
         primary: &Color,
     ) -> Result<(), RenderError> {
         let layout = &self.layout;
         let row_h = layout.minimum_row_line_height;
-        let start = page.start_item.unwrap_or(0);
-        let local_index = page.end_item.saturating_sub(start).saturating_sub(1);
-        let item_index = start + local_index.min(doc.line_items.len() - start);
-        let item = doc
-            .line_items
-            .get(item_index)
-            .ok_or(RenderError::MissingRequiredField("line item"))?;
 
-        // Sequence (left).
+        // Sequence (left) — repeated on continuation fragments for context (rule 4).
         if let Some(col) = layout.column_by_name("sequence") {
             self.text(
                 ops,
@@ -829,25 +906,95 @@ impl QuotationRenderer {
                 );
             }
         }
-        // Right/center-aligned numeric columns.
-        let numeric_cols: [(&str, &str); 6] = [
-            ("hsn_sac", &item.hsn_sac),
-            ("rate_per_item", &item.unit_rate),
-            ("quantity", &item.quantity),
-            ("taxable_value", &item.taxable_value),
-            ("tax_amount", &item.tax_amount),
-            ("amount", amount),
-        ];
-        for (name, value) in &numeric_cols {
-            if let Some(col) = layout.column_by_name(name) {
-                let x = match col.alignment.as_str() {
-                    "right" => col.right - 2.0,
-                    "center" => (col.left + col.right) / 2.0 - 10.0,
-                    _ => col.left + 2.0,
-                };
+        // Financial columns only on the final fragment (rule 4).
+        if !is_continuation {
+            // HSN/SAC (center).
+            if let Some(col) = layout.column_by_name("hsn_sac") {
+                let x = self.align_x(col, &item.hsn_sac, FONT_SIZE_BODY);
                 self.text(
                     ops,
-                    value,
+                    &item.hsn_sac,
+                    x,
+                    *cursor_y + 4.0,
+                    FONT_SIZE_BODY,
+                    BuiltinFont::Helvetica,
+                    primary,
+                );
+            }
+            // Rate per item (right).
+            if let Some(col) = layout.column_by_name("rate_per_item") {
+                let x = self.align_x(col, &item.unit_rate, FONT_SIZE_BODY);
+                self.text(
+                    ops,
+                    &item.unit_rate,
+                    x,
+                    *cursor_y + 4.0,
+                    FONT_SIZE_BODY,
+                    BuiltinFont::Helvetica,
+                    primary,
+                );
+            }
+            // Quantity + unit (right) — layout contract: "Quantity and unit".
+            if let Some(col) = layout.column_by_name("quantity") {
+                let qty = format!("{} {}", item.quantity, item.unit);
+                let x = self.align_x(col, &qty, FONT_SIZE_BODY);
+                self.text(
+                    ops,
+                    &qty,
+                    x,
+                    *cursor_y + 4.0,
+                    FONT_SIZE_BODY,
+                    BuiltinFont::Helvetica,
+                    primary,
+                );
+            }
+            // Taxable value (right).
+            if let Some(col) = layout.column_by_name("taxable_value") {
+                let x = self.align_x(col, &item.taxable_value, FONT_SIZE_BODY);
+                self.text(
+                    ops,
+                    &item.taxable_value,
+                    x,
+                    *cursor_y + 4.0,
+                    FONT_SIZE_BODY,
+                    BuiltinFont::Helvetica,
+                    primary,
+                );
+            }
+            // Tax amount + rate (right) — layout contract: "Tax amount and rate".
+            if let Some(col) = layout.column_by_name("tax_amount") {
+                let tax = format!("{} ({})", item.tax_amount, item.tax_rate);
+                let x = self.align_x(col, &tax, FONT_SIZE_BODY);
+                self.text(
+                    ops,
+                    &tax,
+                    x,
+                    *cursor_y + 4.0,
+                    FONT_SIZE_BODY,
+                    BuiltinFont::Helvetica,
+                    primary,
+                );
+            }
+            // Amount (right).
+            if let Some(col) = layout.column_by_name("amount") {
+                let x = self.align_x(col, &item.amount, FONT_SIZE_BODY);
+                self.text(
+                    ops,
+                    &item.amount,
+                    x,
+                    *cursor_y + 4.0,
+                    FONT_SIZE_BODY,
+                    BuiltinFont::HelveticaBold,
+                    primary,
+                );
+            }
+        } else {
+            // Continuation fragment: repeat HSN/SAC context, no financial amounts (rule 4).
+            if let Some(col) = layout.column_by_name("hsn_sac") {
+                let x = self.align_x(col, &item.hsn_sac, FONT_SIZE_BODY);
+                self.text(
+                    ops,
+                    &item.hsn_sac,
                     x,
                     *cursor_y + 4.0,
                     FONT_SIZE_BODY,
@@ -858,6 +1005,16 @@ impl QuotationRenderer {
         }
         *cursor_y += row_h * (lines.len().max(1) as f32);
         Ok(())
+    }
+
+    /// Compute the x position for text in a column based on alignment.
+    /// Right-aligned text is placed so its right edge sits 2pt inside the column.
+    fn align_x(&self, col: &crate::layout::TableColumn, text: &str, size: f32) -> f32 {
+        match col.alignment.as_str() {
+            "right" => col.right - text_width_pt(text, size) - 2.0,
+            "center" => col.left + (col.width() - text_width_pt(text, size)) / 2.0,
+            _ => col.left + 2.0,
+        }
     }
 
     fn push_item_footer(
@@ -905,10 +1062,10 @@ impl QuotationRenderer {
             BuiltinFont::Helvetica,
             primary,
         );
-        self.text(
+        self.text_right(
             ops,
             &doc.summary.taxable_total,
-            region.x + region.width - 60.0,
+            region.x + region.width,
             y,
             FONT_SIZE_BODY,
             BuiltinFont::Helvetica,
@@ -926,10 +1083,10 @@ impl QuotationRenderer {
                 BuiltinFont::Helvetica,
                 primary,
             );
-            self.text(
+            self.text_right(
                 ops,
                 &comp.amount,
-                region.x + region.width - 60.0,
+                region.x + region.width,
                 y,
                 FONT_SIZE_BODY,
                 BuiltinFont::Helvetica,
@@ -946,10 +1103,10 @@ impl QuotationRenderer {
             BuiltinFont::HelveticaBold,
             primary,
         );
-        self.text(
+        self.text_right(
             ops,
             &doc.summary.grand_total,
-            region.x + region.width - 60.0,
+            region.x + region.width,
             y,
             FONT_SIZE_TOTALS_BOLD,
             BuiltinFont::HelveticaBold,
@@ -1005,10 +1162,52 @@ impl QuotationRenderer {
             primary,
         );
         y += 11.0;
-        for line in &doc.company.address {
+        self.text(
+            ops,
+            &doc.bank.bank_name,
+            region.x,
+            y,
+            FONT_SIZE_BODY,
+            BuiltinFont::Helvetica,
+            primary,
+        );
+        y += 10.0;
+        self.text(
+            ops,
+            &doc.bank.account_name,
+            region.x,
+            y,
+            FONT_SIZE_BODY,
+            BuiltinFont::Helvetica,
+            primary,
+        );
+        y += 10.0;
+        self.text(
+            ops,
+            &doc.bank.account_number,
+            region.x,
+            y,
+            FONT_SIZE_BODY,
+            BuiltinFont::Helvetica,
+            primary,
+        );
+        y += 10.0;
+        self.text(
+            ops,
+            &doc.bank.ifsc,
+            region.x,
+            y,
+            FONT_SIZE_BODY,
+            BuiltinFont::Helvetica,
+            primary,
+        );
+        y += 10.0;
+        if let Some(branch) = &doc.bank.branch
+            && !branch.is_empty()
+        {
             self.text(
                 ops,
-                line,
+                branch,
                 region.x,
                 y,
                 FONT_SIZE_BODY,
@@ -1016,6 +1215,19 @@ impl QuotationRenderer {
                 primary,
             );
             y += 10.0;
+        }
+        if let Some(upi) = &doc.bank.upi_id
+            && !upi.is_empty()
+        {
+            self.text(
+                ops,
+                upi,
+                region.x,
+                y,
+                FONT_SIZE_BODY,
+                BuiltinFont::Helvetica,
+                primary,
+            );
         }
         // Signature slot (labeled, no image embedding).
         if let Some(sig) = &doc.company.signature_ref
@@ -1141,36 +1353,22 @@ impl QuotationRenderer {
         });
         ops.push(Op::EndTextSection);
     }
-}
 
-// Helper used by push_shipping_dispatch to avoid borrowing self in a closure.
-fn write_label(
-    ops: &mut Vec<Op>,
-    label: &str,
-    value: &str,
-    x: f32,
-    y: f32,
-    primary: &Color,
-    renderer: &QuotationRenderer,
-) {
-    renderer.text(
-        ops,
-        label,
-        x,
-        y,
-        FONT_SIZE_BODY,
-        BuiltinFont::HelveticaBold,
-        primary,
-    );
-    renderer.text(
-        ops,
-        value,
-        x + 60.0,
-        y,
-        FONT_SIZE_BODY,
-        BuiltinFont::Helvetica,
-        primary,
-    );
+    /// Right-aligned text: the right edge of the text sits at `right_x_pt`.
+    #[allow(clippy::too_many_arguments)]
+    fn text_right(
+        &self,
+        ops: &mut Vec<Op>,
+        s: &str,
+        right_x_pt: f32,
+        y_pt: f32,
+        size: f32,
+        font: BuiltinFont,
+        color: &Color,
+    ) {
+        let w = text_width_pt(s, size);
+        self.text(ops, s, right_x_pt - w, y_pt, size, font, color);
+    }
 }
 
 impl QuotationDocument {
@@ -1196,16 +1394,22 @@ impl QuotationDocument {
         if self.amount_in_words.trim().is_empty() {
             return Err(RenderError::MissingRequiredField("amount_in_words"));
         }
+        if self.bank.bank_name.trim().is_empty() {
+            return Err(RenderError::MissingRequiredField("bank.bank_name"));
+        }
+        if self.bank.account_number.trim().is_empty() {
+            return Err(RenderError::MissingRequiredField("bank.account_number"));
+        }
         Ok(())
     }
 }
 
 // ---------------------------------------------------------------------------
-// Text wrapping (approximate, at ~0.45 * font_size pt per char)
+// Text wrapping (approximate, at ~0.5 * font_size pt per char)
 // ---------------------------------------------------------------------------
 
 fn wrap_text(text: &str, max_width_pt: f32) -> Vec<String> {
-    let char_width = FONT_SIZE_BODY * 0.45;
+    let char_width = FONT_SIZE_BODY * 0.5;
     let max_chars = ((max_width_pt / char_width) as usize).max(1);
     let mut lines: Vec<String> = Vec::new();
     for paragraph in text.split('\n') {
@@ -1235,18 +1439,7 @@ fn wrap_text(text: &str, max_width_pt: f32) -> Vec<String> {
     lines
 }
 
-// Re-export for tests that inspect the produced document.
-pub use printpdf::{PdfDocument as PdfDocumentHandle, PdfResources as PdfResourcesHandle};
+/// Re-exported for tests that inspect the produced document.
+pub use printpdf::PdfDocument as PdfDocumentHandle;
 
-// Suppress unused-field warnings for fields read only by tests/inspector.
-#[allow(dead_code)]
-fn _region_used(r: &Region) -> f32 {
-    r.width + r.height
-}
-
-// fmt::Write import used for any future formatted labels.
-#[allow(dead_code)]
-fn _write_marker() -> std::fmt::Result {
-    let mut s = String::new();
-    write!(&mut s, "x")
-}
+use crate::layout::PAGE_HEIGHT_PT;

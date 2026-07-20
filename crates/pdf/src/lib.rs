@@ -15,7 +15,7 @@ pub mod render;
 
 pub use layout::{LayoutError, QuotationLayout, Region};
 pub use render::{
-    CompanyRenderData, CustomerRenderData, LineItemRenderData, QuotationDocument,
+    BankRenderData, CompanyRenderData, CustomerRenderData, LineItemRenderData, QuotationDocument,
     QuotationMetaRenderData, QuotationRenderer, RenderError, SummaryRenderData,
     TaxComponentRenderData,
 };
