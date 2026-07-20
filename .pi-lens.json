@@ -1,0 +1,10 @@
+{
+  "format": {
+    "enabled": false
+  },
+  "actionableWarnings": {
+    "autoFix": {
+      "enabled": false
+    }
+  }
+}

@@ -1,6 +1,14 @@
 [workspace]
 resolver = "3"
-members = ["crates/domain", "crates/application", "crates/storage", "crates/telegram", "crates/oauth", "crates/google"]
+members = [
+  "crates/domain",
+  "crates/application",
+  "crates/storage",
+  "crates/telegram",
+  "crates/oauth",
+  "crates/google",
+  "crates/pdf",
+]
 
 [workspace.package]
 edition = "2024"

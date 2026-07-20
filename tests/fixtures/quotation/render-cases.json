@@ -1,0 +1,234 @@
+{
+  "schema_version": 1,
+  "note": "Synthetic render cases for the Version 1 quotation renderer. Company/customer values are fabricated; they are NOT copied from docs/sample-quotation.pdf.",
+  "cases": {
+    "normal": {
+      "company": {
+        "legal_name": "Acme Test Services Pvt Ltd",
+        "tax_id": "GSTIN-29ABCDE1234F1Z5",
+        "address": ["Plot 12, Industrial Estate", "Bengaluru, KA 560001"],
+        "contact": ["+91 80 1234 5678", "billing@acme-test.example"],
+        "logo_ref": "assets/logo.png",
+        "signature_ref": "assets/signature.png"
+      },
+      "meta": {
+        "quotation_number": "ACME-2026-0001",
+        "quotation_date": "20 Jul 2026",
+        "place_of_supply": "Karnataka, India",
+        "validity": "30 days from date of issue",
+        "currency": "INR",
+        "copy_label": "Customer Copy"
+      },
+      "customer": {
+        "name": "Globex Corporation Pvt Ltd",
+        "tax_id": "GSTIN-27XYZAB5678L1Z2",
+        "billing_address": ["4th Floor, Trade Tower", "Mumbai, MH 400051"],
+        "shipping_address": ["Warehouse 7, Logistics Park", "Mumbai, MH 400072"],
+        "dispatch_origin": "Bengaluru"
+      },
+      "line_items": [
+        {
+          "sequence": 1,
+          "description": "Consulting services - architecture review",
+          "hsn_sac": "998314",
+          "quantity": "2",
+          "unit": "hours",
+          "unit_rate": "5000.00",
+          "taxable_value": "10000.00",
+          "tax_rate": "18%",
+          "tax_amount": "1800.00",
+          "amount": "11800.00"
+        },
+        {
+          "sequence": 2,
+          "description": "Implementation support",
+          "hsn_sac": "998315",
+          "quantity": "5",
+          "unit": "hours",
+          "unit_rate": "4000.00",
+          "taxable_value": "20000.00",
+          "tax_rate": "18%",
+          "tax_amount": "3600.00",
+          "amount": "23600.00"
+        },
+        {
+          "sequence": 3,
+          "description": "Documentation handover",
+          "hsn_sac": "998381",
+          "quantity": "1",
+          "unit": "lot",
+          "unit_rate": "8000.00",
+          "taxable_value": "8000.00",
+          "tax_rate": "18%",
+          "tax_amount": "1440.00",
+          "amount": "9440.00"
+        }
+      ],
+      "summary": {
+        "item_count": 3,
+        "total_quantity": "8",
+        "taxable_total": "38000.00",
+        "tax_components": [
+          { "label": "IGST", "rate": "18%", "amount": "6840.00" }
+        ],
+        "grand_total": "44840.00"
+      },
+      "terms": [
+        "Payment due within 15 days of invoice date.",
+        "All disputes are subject to Bengaluru jurisdiction."
+      ],
+      "amount_in_words": "Forty-four thousand eight hundred forty only",
+      "signatory_label": "Authorised Signatory"
+    },
+    "maximum_line": {
+      "company": {
+        "legal_name": "Acme Test Services Pvt Ltd",
+        "tax_id": "GSTIN-29ABCDE1234F1Z5",
+        "address": ["Plot 12, Industrial Estate", "Bengaluru, KA 560001"],
+        "contact": ["+91 80 1234 5678"],
+        "logo_ref": null,
+        "signature_ref": null
+      },
+      "meta": {
+        "quotation_number": "ACME-2026-0002",
+        "quotation_date": "20 Jul 2026",
+        "place_of_supply": "Karnataka, India",
+        "validity": "30 days",
+        "currency": "INR",
+        "copy_label": null
+      },
+      "customer": {
+        "name": "Globex Corporation Pvt Ltd",
+        "tax_id": null,
+        "billing_address": ["4th Floor, Trade Tower", "Mumbai, MH 400051"],
+        "shipping_address": ["Warehouse 7", "Mumbai, MH 400072"],
+        "dispatch_origin": "Bengaluru"
+      },
+      "line_items": [
+        { "sequence": 1, "description": "Item alpha one", "hsn_sac": "998314", "quantity": "1", "unit": "nos", "unit_rate": "1000.00", "taxable_value": "1000.00", "tax_rate": "18%", "tax_amount": "180.00", "amount": "1180.00" },
+        { "sequence": 2, "description": "Item beta two", "hsn_sac": "998315", "quantity": "2", "unit": "nos", "unit_rate": "1100.00", "taxable_value": "2200.00", "tax_rate": "18%", "tax_amount": "396.00", "amount": "2596.00" },
+        { "sequence": 3, "description": "Item gamma three", "hsn_sac": "998316", "quantity": "1", "unit": "nos", "unit_rate": "1200.00", "taxable_value": "1200.00", "tax_rate": "18%", "tax_amount": "216.00", "amount": "1416.00" },
+        { "sequence": 4, "description": "Item delta four", "hsn_sac": "998317", "quantity": "1", "unit": "nos", "unit_rate": "1300.00", "taxable_value": "1300.00", "tax_rate": "18%", "tax_amount": "234.00", "amount": "1534.00" },
+        { "sequence": 5, "description": "Item epsilon five", "hsn_sac": "998318", "quantity": "1", "unit": "nos", "unit_rate": "1400.00", "taxable_value": "1400.00", "tax_rate": "18%", "tax_amount": "252.00", "amount": "1652.00" },
+        { "sequence": 6, "description": "Item zeta six", "hsn_sac": "998319", "quantity": "1", "unit": "nos", "unit_rate": "1500.00", "taxable_value": "1500.00", "tax_rate": "18%", "tax_amount": "270.00", "amount": "1770.00" },
+        { "sequence": 7, "description": "Item eta seven", "hsn_sac": "998320", "quantity": "1", "unit": "nos", "unit_rate": "1600.00", "taxable_value": "1600.00", "tax_rate": "18%", "tax_amount": "288.00", "amount": "1888.00" }
+      ],
+      "summary": {
+        "item_count": 7,
+        "total_quantity": "8",
+        "taxable_total": "10200.00",
+        "tax_components": [{ "label": "IGST", "rate": "18%", "amount": "1836.00" }],
+        "grand_total": "12036.00"
+      },
+      "terms": ["Payment due within 15 days."],
+      "amount_in_words": "Twelve thousand thirty six only",
+      "signatory_label": "Authorised Signatory"
+    },
+    "wrapping": {
+      "company": {
+        "legal_name": "Acme Test Services Pvt Ltd",
+        "tax_id": "GSTIN-29ABCDE1234F1Z5",
+        "address": ["Plot 12, Industrial Estate", "Bengaluru, KA 560001"],
+        "contact": ["+91 80 1234 5678"],
+        "logo_ref": null,
+        "signature_ref": null
+      },
+      "meta": {
+        "quotation_number": "ACME-2026-0003",
+        "quotation_date": "20 Jul 2026",
+        "place_of_supply": "Karnataka, India",
+        "validity": "30 days",
+        "currency": "INR",
+        "copy_label": null
+      },
+      "customer": {
+        "name": "Globex Corporation Pvt Ltd",
+        "tax_id": null,
+        "billing_address": ["4th Floor, Trade Tower", "Mumbai, MH 400051"],
+        "shipping_address": ["Warehouse 7"],
+        "dispatch_origin": null
+      },
+      "line_items": [
+        {
+          "sequence": 1,
+          "description": "Comprehensive cloud migration assessment including infrastructure audit, cost modelling, security review, and a detailed phased cutover plan with rollback runbooks",
+          "hsn_sac": "998314",
+          "quantity": "1",
+          "unit": "lot",
+          "unit_rate": "50000.00",
+          "taxable_value": "50000.00",
+          "tax_rate": "18%",
+          "tax_amount": "9000.00",
+          "amount": "59000.00"
+        }
+      ],
+      "summary": {
+        "item_count": 1,
+        "total_quantity": "1",
+        "taxable_total": "50000.00",
+        "tax_components": [{ "label": "IGST", "rate": "18%", "amount": "9000.00" }],
+        "grand_total": "59000.00"
+      },
+      "terms": ["Payment due within 15 days."],
+      "amount_in_words": "Fifty nine thousand only",
+      "signatory_label": "Authorised Signatory"
+    },
+    "overflow": {
+      "company": {
+        "legal_name": "Acme Test Services Pvt Ltd",
+        "tax_id": "GSTIN-29ABCDE1234F1Z5",
+        "address": ["Plot 12, Industrial Estate", "Bengaluru, KA 560001"],
+        "contact": ["+91 80 1234 5678"],
+        "logo_ref": null,
+        "signature_ref": null
+      },
+      "meta": {
+        "quotation_number": "ACME-2026-0004",
+        "quotation_date": "20 Jul 2026",
+        "place_of_supply": "Karnataka, India",
+        "validity": "30 days",
+        "currency": "INR",
+        "copy_label": null
+      },
+      "customer": {
+        "name": "Globex Corporation Pvt Ltd",
+        "tax_id": null,
+        "billing_address": ["4th Floor, Trade Tower", "Mumbai, MH 400051"],
+        "shipping_address": ["Warehouse 7"],
+        "dispatch_origin": null
+      },
+      "line_items": [
+        { "sequence": 1, "description": "Line item one for overflow testing", "hsn_sac": "998314", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 2, "description": "Line item two", "hsn_sac": "998315", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 3, "description": "Line item three", "hsn_sac": "998316", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 4, "description": "Line item four", "hsn_sac": "998317", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 5, "description": "Line item five", "hsn_sac": "998318", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 6, "description": "Line item six", "hsn_sac": "998319", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 7, "description": "Line item seven", "hsn_sac": "998320", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 8, "description": "Line item eight", "hsn_sac": "998321", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 9, "description": "Line item nine", "hsn_sac": "998322", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 10, "description": "Line item ten", "hsn_sac": "998323", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 11, "description": "Line item eleven", "hsn_sac": "998324", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 12, "description": "Line item twelve", "hsn_sac": "998325", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 13, "description": "Line item thirteen", "hsn_sac": "998326", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 14, "description": "Line item fourteen", "hsn_sac": "998327", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 15, "description": "Line item fifteen", "hsn_sac": "998328", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 16, "description": "Line item sixteen", "hsn_sac": "998329", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 17, "description": "Line item seventeen", "hsn_sac": "998330", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 18, "description": "Line item eighteen", "hsn_sac": "998331", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 19, "description": "Line item nineteen", "hsn_sac": "998332", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" },
+        { "sequence": 20, "description": "Line item twenty", "hsn_sac": "998333", "quantity": "1", "unit": "nos", "unit_rate": "100.00", "taxable_value": "100.00", "tax_rate": "18%", "tax_amount": "18.00", "amount": "118.00" }
+      ],
+      "summary": {
+        "item_count": 20,
+        "total_quantity": "20",
+        "taxable_total": "2000.00",
+        "tax_components": [{ "label": "IGST", "rate": "18%", "amount": "360.00" }],
+        "grand_total": "2360.00"
+      },
+      "terms": ["Payment due within 15 days.", "Subject to Bengaluru jurisdiction."],
+      "amount_in_words": "Two thousand three hundred sixty only",
+      "signatory_label": "Authorised Signatory"
+    }
+  }
+}
