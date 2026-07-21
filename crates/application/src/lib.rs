@@ -8,3 +8,4 @@ pub mod external_operation;
 pub mod ports;
 pub mod publication;
 pub mod repositories;
+pub mod sanitized_history;

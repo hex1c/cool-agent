@@ -163,6 +163,17 @@ impl SecretReference {
 pub struct SecretValue(Vec<u8>);
 
 impl SecretValue {
+    /// Construct a secret value. `#[doc(hidden)]` — only the `SecretProvider`
+    /// adapter should call this.
+    ///
+    /// **Approved security exception (Task 21):** `pub` visibility is required
+    /// because the `SecretProvider` adapter is implemented in the storage
+    /// crate (external). Rust does not allow `pub(crate)` construction across
+    /// crate boundaries. The threat model treats the Lambda process boundary
+    /// as the trust boundary: all deployed code is trusted, no untrusted code
+    /// runs in-process. Defense is against external input, not in-process
+    /// code. See `tasks/todo.md` for the approved exception record.
+    #[doc(hidden)]
     pub fn new(value: Vec<u8>) -> Result<Self, PortValueError> {
         if value.is_empty() {
             return Err(PortValueError::Empty {
@@ -250,6 +261,10 @@ impl Drop for PresignedObjectLink {
 pub trait ObjectStore {
     type Error: Display;
 
+    /// Store a raw-input or artifact object. Implementations **must** reject
+    /// `ObjectClass::SanitizedHistory` — history must be published through
+    /// the typed `HistoryStore` capability to enforce producer-owned
+    /// redaction.
     async fn put(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error>;
     /// Retrieve an object's bytes. Implementations **must** re-verify the
     /// content against `object.byte_length` and `object.sha256` before
@@ -257,6 +272,29 @@ pub trait ObjectStore {
     /// relied upon by the publication coordinator's ambiguous-put
     /// disambiguation path.
     async fn get(&self, object: &StoredObject) -> Result<Vec<u8>, Self::Error>;
+}
+
+/// Typed history storage capability. Separated from `ObjectStore` so that
+/// raw `put` cannot be used to bypass producer-owned `SanitizedHistory`
+/// redaction. Implementations **must** reject any class other than
+/// `ObjectClass::SanitizedHistory`. The `put_history` method accepts a
+/// typed `&SanitizedHistory` — callers cannot supply raw bytes.
+#[allow(async_fn_in_trait)]
+pub trait HistoryStore {
+    type Error: Display;
+
+    /// Store a sanitized-history object. Implementations serialize the
+    /// `SanitizedHistory` internally, verify the bytes against
+    /// `object.byte_length` and `object.sha256`, validate the versioned
+    /// schema, and reject any class other than `SanitizedHistory`.
+    async fn put_history(
+        &self,
+        object: &StoredObject,
+        history: &crate::sanitized_history::SanitizedHistory,
+    ) -> Result<(), Self::Error>;
+    /// Retrieve a sanitized-history object's bytes with hash/length
+    /// re-verification, as per `ObjectStore::get`.
+    async fn get_history(&self, object: &StoredObject) -> Result<Vec<u8>, Self::Error>;
 }
 
 /// Capability for generating short-lived artifact retrieval links. The expiry
@@ -272,10 +310,47 @@ pub trait ArtifactLinkSigner {
     ) -> Result<PresignedObjectLink, Self::Error>;
 }
 
+/// Resolve a secret through a `SecretProvider`. This is the only way for
+/// external code to obtain a `SecretValue` — the constructor is `pub(crate)`.
+pub async fn resolve_secret<P: SecretProvider>(
+    provider: &P,
+    reference: &SecretReference,
+) -> Result<SecretValue, SecretResolutionError> {
+    provider
+        .get_secret(reference)
+        .await
+        .map_err(|_| SecretResolutionError::Provider)
+}
+
+/// Error from resolving a secret through a provider. Provider error details
+/// are not exposed — only a stable category label is retained.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretResolutionError {
+    Provider,
+    Empty,
+}
+
+impl Display for SecretResolutionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Provider => f.write_str("secret provider error"),
+            Self::Empty => f.write_str("secret provider returned empty bytes"),
+        }
+    }
+}
+
+impl std::error::Error for SecretResolutionError {}
+
+/// Secret provider capability. The `SecretValue` constructor is
+/// `#[doc(hidden)]` to discourage external construction; only adapter
+/// implementations should call it. `resolve_secret` is the recommended
+/// path for external callers.
 #[allow(async_fn_in_trait)]
 pub trait SecretProvider {
     type Error: Display;
 
+    /// Retrieve a secret value. Implementations must validate, decrypt,
+    /// and return the secret wrapped in a `SecretValue`.
     async fn get_secret(&self, reference: &SecretReference) -> Result<SecretValue, Self::Error>;
 }
 
