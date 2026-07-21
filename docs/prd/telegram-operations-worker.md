@@ -86,6 +86,14 @@ services after an approved group participant reviews and confirms the action.
     as end-to-end encrypted. AWS copies remain encrypted in transit and at rest.
 18. Development, staging, and production use isolated stacks in the same AWS
     account and share the combined ₹300 monthly AWS budget.
+19. Each forum topic hosts one workflow identity. After a terminal outcome, the
+    topic remains available for read-only questions about retained session
+    history, but the workflow is not reopened and new or changed work requires a
+    new topic.
+20. Confirmation and cancellation prefer live approved-group membership. When
+    the Telegram membership request times out or its connection fails, positive
+    evidence for the same participant and approved forum may be reused for less
+    than 30 minutes. At 30 minutes it is expired.
 
 ## 3. Scope
 
@@ -182,6 +190,13 @@ attached to another topic, even when the same employee participates in both.
   but no OAuth state or credential material.
 - The workflow pauses when the workflow owner's Google account is required but
   is not connected or must be reauthorized.
+- A terminal topic may answer read-only follow-up questions from sanitized
+  retained conversation, workflow history, audit records, and existing artifact
+  metadata or links. It cannot change workflow state, accept new workflow
+  attachments, create a preview, perform an external mutation, or start another
+  workflow. New or changed work receives an instruction to create a new topic.
+- Late attachments, mutation requests, and callbacks do not reopen terminal
+  workflows. Duplicate messages remain subject to update deduplication.
 
 ### 4.3 Progress stages
 
@@ -220,6 +235,15 @@ At minimum, progress is reported for:
 
 Group membership is the authorization boundary. Google accounts are not
 restricted to a company domain.
+
+Confirmation and cancellation use the same membership policy. The worker first
+attempts a live lookup. An explicit non-member response rejects the action. A
+cached positive result may be used only when the lookup times out or its
+connection cannot be established or maintained, only for the same participant
+and approved forum, and only while its live observation is less than 30 minutes
+old. API responses, API errors, malformed evidence, negative evidence, and
+future-dated evidence do not permit cache fallback. Authorization records whether
+live or outage-cache evidence was used.
 
 ## 6. Workflow Requirements
 

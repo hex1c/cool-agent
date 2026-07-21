@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::identity::{ParticipantId, WorkflowId};
+use crate::identity::{ParticipantId, TopicSessionId, WorkflowId};
 
 /// Monotonically increasing optimistic-lock revision of a workflow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -165,6 +165,7 @@ pub enum WorkflowStateKind {
 #[serde(deny_unknown_fields)]
 pub struct Workflow {
     id: WorkflowId,
+    topic: TopicSessionId,
     owner: ParticipantId,
     state: WorkflowState,
     revision: WorkflowRevision,
@@ -172,9 +173,15 @@ pub struct Workflow {
 }
 
 impl Workflow {
-    pub fn new(id: WorkflowId, owner: ParticipantId, accepted_at: WorkflowTimestamp) -> Self {
+    pub fn new(
+        id: WorkflowId,
+        topic: TopicSessionId,
+        owner: ParticipantId,
+        accepted_at: WorkflowTimestamp,
+    ) -> Self {
         Self {
             id,
+            topic,
             owner,
             state: WorkflowState::RequestAccepted,
             revision: WorkflowRevision::INITIAL,
@@ -184,6 +191,10 @@ impl Workflow {
 
     pub fn id(&self) -> &WorkflowId {
         &self.id
+    }
+
+    pub const fn topic(&self) -> TopicSessionId {
+        self.topic
     }
 
     pub const fn owner(&self) -> ParticipantId {
@@ -210,6 +221,7 @@ impl Workflow {
     ) -> Self {
         Self {
             id: self.id.clone(),
+            topic: self.topic,
             owner: self.owner,
             state,
             revision,

@@ -13,15 +13,18 @@ pub mod transition;
 pub mod workflow;
 
 pub use authorization::{
-    AuthorizationError, AuthorizedParticipant, AuthorizedWorkflowAction, LiveMembershipEvidence,
-    MembershipStatus, authorize_participant,
+    AuthorizationError, AuthorizedActionAudit, AuthorizedActionError, AuthorizedParticipant,
+    AuthorizedTransitionOutcome, AuthorizedTransitionRequest, AuthorizedWorkflowAction,
+    CachedMembershipApproval, LiveMembershipEvidence, MAX_CACHED_MEMBERSHIP_AGE_SECONDS,
+    MembershipAuthorizationSource, MembershipLookupOutage, MembershipLookupOutageKind,
+    MembershipStatus, authorize_participant, authorize_participant_from_cache,
 };
 pub use confirmation::{
     ConfirmationAction, ConfirmationConsumePrecondition, ConfirmationConsumeRequest,
-    ConfirmationConsumption, ConfirmationError, ConfirmationIssueOutcome,
-    ConfirmationIssuePrecondition, ConfirmationIssueRequest, ConfirmationRecord,
-    ConfirmationStatus, ConsumedConfirmation, MutationTargetFingerprint, PendingConfirmation,
-    PreviewDigest, TopicMessageReference,
+    ConfirmationConsumption, ConfirmationCorrectionOutcome, ConfirmationCorrectionRequest,
+    ConfirmationError, ConfirmationIssueOutcome, ConfirmationIssuePrecondition,
+    ConfirmationIssueRequest, ConfirmationRecord, ConfirmationStatus, ConsumedConfirmation,
+    MutationTargetFingerprint, PendingConfirmation, PreviewDigest, TopicMessageReference,
 };
 pub use transition::{
     TransitionAudit, TransitionError, TransitionOutcome, TransitionRequest, WorkflowTransition,

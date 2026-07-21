@@ -25,8 +25,10 @@ paths, rollback consideration, and human approval before deploy.
   versioned request and returns schema-validated JSON; it cannot call Telegram,
   Google, SMTP, S3, or other mutation APIs.
 - Treat `(chat_id, message_thread_id)` as the workflow session boundary. Private
-  chat is OAuth-only, and non-forum groups are unsupported. Each topic may host
-  exactly one workflow; a completed or cancelled topic cannot start another.
+  chat is OAuth-only, and non-forum groups are unsupported. Each topic hosts
+  exactly one workflow and cannot start another after reaching a terminal state.
+  The topic remains available for read-only questions about retained session
+  history; new or changed work requires a new topic.
 - Keep BotFather privacy mode enabled and require users to mention Novus or reply
   to it on every bot-directed turn, including attachment uploads. Persist every
   image the bot receives for the workflow so later tagged turns can reuse earlier
@@ -55,8 +57,10 @@ paths, rollback consideration, and human approval before deploy.
 - Use a cost-effective basic-reasoning model rather than a deep-thinking model.
   Production selection still requires reliable schema-valid output, acceptable
   fixture accuracy and latency, Pi compatibility, and provider cost.
-- Check approved-group membership live at every confirmation and cancellation;
-  permit only a short cached result when Telegram is temporarily unavailable.
+- Check approved-group membership live at every confirmation and cancellation.
+  When the Telegram membership request times out or loses its connection, permit
+  positive evidence for the same forum and participant for less than 30 minutes;
+  confirmation and cancellation use the same fail-closed cache policy.
 - Obtain development credentials and final company/signature assets incrementally
   during implementation. Mocks may unblock early work, but real-provider tests
   and deployments remain gated on the applicable credentials or assets.
@@ -106,7 +110,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 ### Phase 0: Fail-Fast Feasibility
 
 - [ ] Task 1: Validate tagged Telegram forum turns and retained image behavior
-- [ ] Task 2: Freeze one-workflow-per-topic and confirmation semantics
+- [x] Task 2: Freeze one-workflow-per-topic and confirmation semantics
 - [ ] Task 3: Prove Rust 1.97 Lambda builds through SAM with `cargo-lambda`
 - [ ] Task 4: Analyze quotation pagination and select a Lambda-compatible renderer
 - [ ] Task 5: Benchmark basic-reasoning AI models and Pi compatibility
@@ -139,7 +143,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 - [x] Task 14: Implement domain identities and topic routing
 - [x] Task 15: Implement the workflow state machine
-- [ ] Task 16: Implement live membership authorization and revision-bound confirmation
+- [x] Task 16: Implement live membership authorization and revision-bound confirmation
 - [ ] Task 17: Implement idempotency and retry policy
 - [ ] Task 18: Implement the budget decision policy
 - [ ] Task 19: Define persistence ports and DynamoDB keys
@@ -262,8 +266,9 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 ## Resolved Product and Implementation Decisions
 
-1. Each Telegram topic hosts exactly one workflow. Starting another workflow
-   requires a new topic.
+1. Each Telegram topic hosts exactly one workflow. After a terminal outcome,
+   approved participants may continue asking read-only questions about retained
+   session history, but new or changed work requires a new topic.
 2. BotFather privacy mode remains enabled. Users must mention Novus or reply to
    it on every bot-directed turn, including image uploads. Novus persists images
    it receives so later tagged turns in the workflow can use them; it cannot read
@@ -280,5 +285,8 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
    incrementally during development, before the tests or deployment gates that
    require them.
 8. Approved-group membership is checked live for every confirmation and
-   cancellation. A short cached result is allowed only for temporary Telegram
-   outage tolerance.
+   cancellation. If the membership request times out or its connection fails,
+   positive evidence for the same forum and participant may be reused for less
+   than 30 minutes. Confirmation and cancellation use the same policy.
+9. Corrections may return the workflow to calculation or drafting and invalidate
+   the current preview, but only an approved participant may correct it.

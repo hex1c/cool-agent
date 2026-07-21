@@ -3,9 +3,10 @@ use domain::identity::{
     ChatId, ConfirmationId, MessageId, MessageThreadId, ParticipantId, TopicSessionId, WorkflowId,
 };
 use domain::{
-    ConfirmationAction, ConfirmationConsumeRequest, ConfirmationIssueRequest, ConfirmationRecord,
-    MutationTargetFingerprint, PreviewDigest, TopicMessageReference, TransitionAudit,
-    TransitionError, TransitionOutcome, TransitionRequest, WaitDeadline, Workflow,
+    AuthorizedParticipant, AuthorizedTransitionRequest, ConfirmationAction,
+    ConfirmationConsumeRequest, ConfirmationCorrectionRequest, ConfirmationIssueRequest,
+    ConfirmationRecord, MutationTargetFingerprint, PreviewDigest, TopicMessageReference,
+    TransitionAudit, TransitionError, TransitionOutcome, TransitionRequest, WaitDeadline, Workflow,
     WorkflowRevision, WorkflowState, WorkflowStateKind, WorkflowTimestamp, WorkflowTransition,
 };
 
@@ -20,6 +21,7 @@ fn deadline(seconds: u64) -> WaitDeadline {
 fn workflow() -> Result<Workflow, Box<dyn std::error::Error>> {
     Ok(Workflow::new(
         WorkflowId::new("workflow-15")?,
+        topic()?,
         ParticipantId::new(101)?,
         time(1),
     ))
@@ -78,13 +80,9 @@ fn request_confirmation(
     ))
 }
 
-fn consume_confirmation(
-    workflow: &Workflow,
-    confirmation: &ConfirmationRecord,
-    at: u64,
-) -> Result<Workflow, Box<dyn std::error::Error>> {
+fn participant_authorization(at: u64) -> Result<AuthorizedParticipant, Box<dyn std::error::Error>> {
     let actor = ParticipantId::new(202)?;
-    let authorized = authorize_participant(
+    Ok(authorize_participant(
         ChatId::new(-1001),
         actor,
         &LiveMembershipEvidence::new(
@@ -94,7 +92,15 @@ fn consume_confirmation(
             time(at),
         ),
         time(at),
-    )?;
+    )?)
+}
+
+fn consume_confirmation(
+    workflow: &Workflow,
+    confirmation: &ConfirmationRecord,
+    at: u64,
+) -> Result<Workflow, Box<dyn std::error::Error>> {
+    let authorized = participant_authorization(at)?;
     Ok(confirmation
         .consume(
             workflow,
@@ -104,6 +110,44 @@ fn consume_confirmation(
                 mutation_target: MutationTargetFingerprint::new([2; 32]),
                 source: TopicMessageReference::new(topic()?, MessageId::new(i64::try_from(at)?)?),
                 confirmed_at: time(at),
+            },
+        )?
+        .transition
+        .workflow)
+}
+
+fn correct_confirmation(
+    workflow: &Workflow,
+    confirmation: &ConfirmationRecord,
+    at: u64,
+) -> Result<Workflow, Box<dyn std::error::Error>> {
+    let authorized = participant_authorization(at)?;
+    Ok(confirmation
+        .correct(
+            workflow,
+            &authorized.for_workflow(workflow),
+            ConfirmationCorrectionRequest {
+                source: TopicMessageReference::new(
+                    workflow.topic(),
+                    MessageId::new(i64::try_from(at)?)?,
+                ),
+                corrected_at: time(at),
+            },
+        )?
+        .transition
+        .workflow)
+}
+
+fn stop_workflow(workflow: &Workflow, at: u64) -> Result<Workflow, Box<dyn std::error::Error>> {
+    let authorized = participant_authorization(at)?;
+    Ok(workflow
+        .stop_authorized(
+            &authorized,
+            AuthorizedTransitionRequest {
+                expected_workflow_revision: workflow.revision(),
+                topic: workflow.topic(),
+                source_message: MessageId::new(i64::try_from(at)?)?,
+                timestamp: time(at),
             },
         )?
         .transition
@@ -319,9 +363,9 @@ fn workflow_state_clarification_and_correction_loops_resume_the_right_stage()
         WorkflowTransition::CompleteCalculationOrDrafting,
         21,
     )?;
-    let (confirmation, _) =
+    let (confirmation, pending) =
         request_confirmation(&drafted, ConfirmationAction::StartSheetOrDocWrite, 22, 30)?;
-    let corrected = advance(&confirmation, WorkflowTransition::ApplyCorrection, 23)?;
+    let corrected = correct_confirmation(&confirmation, &pending, 23)?;
     assert_eq!(
         corrected.state(),
         &WorkflowState::CalculationOrDraftingStarted
@@ -332,17 +376,19 @@ fn workflow_state_clarification_and_correction_loops_resume_the_right_stage()
 #[test]
 fn workflow_state_waits_expire_and_reject_late_or_premature_actions()
 -> Result<(), Box<dyn std::error::Error>> {
-    let (waiting, _) = waiting_for_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
-    let late = waiting.transition(TransitionRequest {
-        transition: WorkflowTransition::ApplyCorrection,
-        expected_revision: waiting.revision(),
-        actor: ParticipantId::new(202)?,
-        source_message: MessageId::new(100)?,
-        timestamp: time(100),
-    });
+    let (waiting, pending) = waiting_for_confirmation(ConfirmationAction::StartSheetOrDocWrite)?;
+    let authorized = participant_authorization(100)?;
+    let late = pending.correct(
+        &waiting,
+        &authorized.for_workflow(&waiting),
+        ConfirmationCorrectionRequest {
+            source: TopicMessageReference::new(waiting.topic(), MessageId::new(100)?),
+            corrected_at: time(100),
+        },
+    );
     assert!(matches!(
         late,
-        Err(TransitionError::WaitDeadlineElapsed { .. })
+        Err(domain::ConfirmationError::Expired { .. })
     ));
 
     let premature = waiting.transition(TransitionRequest {
@@ -422,7 +468,7 @@ fn workflow_state_waits_expire_and_reject_late_or_premature_actions()
 fn workflow_state_terminal_states_are_immutable() -> Result<(), Box<dyn std::error::Error>> {
     let active = workflow()?;
     let failed = advance(&active, WorkflowTransition::FailWorkflow, 2)?;
-    let stopped = advance(&active, WorkflowTransition::StopWorkflow, 2)?;
+    let stopped = stop_workflow(&active, 2)?;
     assert_eq!(failed.state(), &WorkflowState::Failed);
     assert_eq!(stopped.state(), &WorkflowState::Stopped);
 
@@ -481,6 +527,7 @@ fn workflow_state_revision_exhaustion_is_typed() -> Result<(), Box<dyn std::erro
     let serialized = format!(
         r#"{{
             "id": "workflow-15",
+            "topic": {{"chat_id": -1001, "message_thread_id": 77}},
             "owner": 101,
             "state": {{"stage": "request_accepted"}},
             "revision": {},

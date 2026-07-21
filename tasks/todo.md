@@ -41,13 +41,13 @@ binding and replay rules for confirmations and callbacks.
 
 **Acceptance criteria:**
 
-- [ ] The decision defines topic reuse, terminal-topic behavior, and late-message handling.
+- [x] The decision defines topic reuse, terminal-topic behavior, and late-message handling.
 - [x] Confirmation binds workflow revision, preview digest, target, owner, actor, and expiry.
 - [x] Live membership checks and outage behavior are explicitly decided.
 
 **Verification:**
 
-- [ ] Human approves the ADR and corresponding PRD clarification if needed.
+- [x] Human approves the ADR and corresponding PRD clarification if needed.
 
 **Dependencies:** Task 1
 
@@ -457,14 +457,14 @@ atomic preview confirmation semantics independently of adapters.
 
 **Acceptance criteria:**
 
-- [ ] Any approved participant may act, but Google operations remain bound to the workflow owner.
-- [ ] Confirmation validates revision, digest, target, actor, owner, membership, and expiry.
-- [ ] Stale, replayed, corrected, expired, or cancelled confirmations fail safely.
+- [x] Any approved participant may act, but Google operations remain bound to the workflow owner.
+- [x] Confirmation validates revision, digest, target, actor, owner, membership, and expiry.
+- [x] Stale, replayed, corrected, expired, or cancelled confirmations fail safely.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p domain authorization confirmation`
-- [ ] Coverage check: authorization and confirmation reach 100% branch coverage.
+- [x] Tests pass: `cargo test -p domain --test authorization_policy && cargo test -p domain --test confirmation_policy`
+- [x] Coverage check: authorization and confirmation reach 100% branch coverage.
 
 **Dependencies:** Tasks 2, 15
 
