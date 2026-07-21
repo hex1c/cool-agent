@@ -3,7 +3,7 @@ name: TypeScript agent harness
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [dev, staging, prod]
 
 permissions:
   contents: read

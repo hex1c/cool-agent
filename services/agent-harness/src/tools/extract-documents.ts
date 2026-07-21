@@ -8,18 +8,18 @@ import { Type, type Static } from "typebox";
  * external-service access.
  */
 export interface NormalizedDocumentRef {
-	readonly objectRef: string;
-	readonly mediaType: string;
-	readonly extractedText: string | null;
+  readonly objectRef: string;
+  readonly mediaType: string;
+  readonly extractedText: string | null;
 }
 
 const TOOL_NAME = "extract_documents";
 
 const ExtractParameters = Type.Object({
-	object_refs: Type.Array(
-		Type.String({ description: "Document object reference to extract." }),
-		{ description: "Document object references to extract." },
-	),
+  object_refs: Type.Array(
+    Type.String({ description: "Document object reference to extract." }),
+    { description: "Document object references to extract." },
+  ),
 });
 
 type ExtractParametersType = Static<typeof ExtractParameters>;
@@ -31,15 +31,15 @@ type ExtractParametersType = Static<typeof ExtractParameters>;
  * unavailable when requested.
  */
 function buildDocumentIndex(
-	documents: readonly NormalizedDocumentRef[],
+  documents: readonly NormalizedDocumentRef[],
 ): Map<string, string> {
-	const byRef = new Map<string, string>();
-	for (const doc of documents) {
-		if (doc.extractedText != null) {
-			byRef.set(doc.objectRef, doc.extractedText);
-		}
-	}
-	return byRef;
+  const byRef = new Map<string, string>();
+  for (const doc of documents) {
+    if (doc.extractedText != null) {
+      byRef.set(doc.objectRef, doc.extractedText);
+    }
+  }
+  return byRef;
 }
 
 /**
@@ -49,18 +49,18 @@ function buildDocumentIndex(
  * notice for references that have no normalized text.
  */
 export function extractDocumentText(
-	documents: readonly NormalizedDocumentRef[],
-	refs: readonly string[],
+  documents: readonly NormalizedDocumentRef[],
+  refs: readonly string[],
 ): string {
-	const byRef = buildDocumentIndex(documents);
-	const blocks = refs.map((ref) => {
-		const text = byRef.get(ref);
-		if (text == null) {
-			return `${ref}: no normalized text available`;
-		}
-		return `${ref}:\n${text}`;
-	});
-	return blocks.join("\n\n");
+  const byRef = buildDocumentIndex(documents);
+  const blocks = refs.map((ref) => {
+    const text = byRef.get(ref);
+    if (text == null) {
+      return `${ref}: no normalized text available`;
+    }
+    return `${ref}:\n${text}`;
+  });
+  return blocks.join("\n\n");
 }
 
 /**
@@ -71,23 +71,23 @@ export function extractDocumentText(
  * call external services, or mutate anything.
  */
 export function createExtractDocumentsTool(
-	documents: readonly NormalizedDocumentRef[],
+  documents: readonly NormalizedDocumentRef[],
 ) {
-	return defineTool({
-		name: TOOL_NAME,
-		label: "Extract Documents",
-		description:
-			"Return the pre-normalized text for the requested document object references. " +
-			"No filesystem, network, or external-service access is available.",
-		parameters: ExtractParameters,
-		execute: async (_toolCallId, params: ExtractParametersType) => {
-			const text = extractDocumentText(documents, params.object_refs);
-			return {
-				content: [{ type: "text" as const, text }],
-				details: {},
-			};
-		},
-	});
+  return defineTool({
+    name: TOOL_NAME,
+    label: "Extract Documents",
+    description:
+      "Return the pre-normalized text for the requested document object references. " +
+      "No filesystem, network, or external-service access is available.",
+    parameters: ExtractParameters,
+    execute: async (_toolCallId, params: ExtractParametersType) => {
+      const text = extractDocumentText(documents, params.object_refs);
+      return {
+        content: [{ type: "text" as const, text }],
+        details: {},
+      };
+    },
+  });
 }
 
 export const extractDocumentsToolName = TOOL_NAME;
