@@ -1,0 +1,43 @@
+{
+  "Comment": "Read-only wait/resume/timeout slice for confirmation (Task 31). Executed locally via Step Functions Local alongside DynamoDB Local.",
+  "StartAt": "CheckStatus",
+  "States": {
+    "CheckStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.status",
+          "StringEquals": "Confirmed",
+          "Next": "Confirmed"
+        },
+        {
+          "Variable": "$.status",
+          "StringEquals": "Cancelled",
+          "Next": "Cancelled"
+        },
+        {
+          "Variable": "$.status",
+          "StringEquals": "TimedOut",
+          "Next": "TimedOut"
+        }
+      ],
+      "Default": "WaitForConfirmation"
+    },
+    "WaitForConfirmation": {
+      "Type": "Wait",
+      "SecondsPath": "$.waitSeconds",
+      "Next": "TimedOut"
+    },
+    "Confirmed": {
+      "Type": "Succeed"
+    },
+    "Cancelled": {
+      "Type": "Fail",
+      "Cause": "Cancelled by operator"
+    },
+    "TimedOut": {
+      "Type": "Fail",
+      "Cause": "Confirmation wait timed out"
+    }
+  }
+}

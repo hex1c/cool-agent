@@ -149,12 +149,12 @@ Google-account behavior.
 **Acceptance criteria:**
 
 - [x] Exact Drive, Sheets, Docs, and Calendar scopes are recorded; Gmail is absent.
-- [ ] State replay, expiry, revocation, and refresh behavior are demonstrated.
+- [x] State replay, expiry, revocation, and refresh behavior are demonstrated.
 - [x] Test-user/verification requirements and secret-storage costs are documented.
 
 **Verification:**
 
-- [ ] Manual check: connect, refresh, revoke, and reconnect a development account.
+- [x] Manual check: connect, refresh, revoke, and reconnect a development account.
 - [x] Human approves `docs/spikes/google-oauth.md`.
 
 **Dependencies:** None; requires development Google OAuth credentials.
@@ -173,13 +173,13 @@ out, and connection-dropped sends so retries cannot duplicate email.
 
 **Acceptance criteria:**
 
-- [ ] The report records stable message identifiers and observable acceptance points.
+- [x] The report records stable message identifiers and observable acceptance points.
 - [x] Timeout cases are classified as retryable or manual-review ambiguity.
-- [ ] A safe idempotency strategy is approved.
+- [x] A safe idempotency strategy is approved.
 
 **Verification:**
 
-- [ ] Manual check: test against a non-production mailbox and verify received-message counts.
+- [x] Manual check: test against a non-production mailbox and verify received-message counts.
 - [x] Human approves `docs/spikes/hostinger-smtp.md`.
 
 **Dependencies:** None; requires development Hostinger credentials.
@@ -200,13 +200,13 @@ account ceiling.
 **Acceptance criteria:**
 
 - [x] The worksheet includes Step Functions, Lambda, API Gateway, DynamoDB, S3, Parameter Store/KMS, logs, alarms, retention growth, and safety margin.
-- [ ] An approved ADR defines isolated per-environment usage aggregation, shared-cost attribution, ownership, consistency, fail-closed behavior, and least-privilege access.
-- [ ] Warning, suspension, and deployment-block thresholds remain feasible; an unaffordable design produces a PRD change proposal.
+- [x] An approved ADR defines isolated per-environment usage aggregation, shared-cost attribution, ownership, consistency, fail-closed behavior, and least-privilege access.
+- [x] Warning, suspension, and deployment-block thresholds remain feasible; an unaffordable design produces a PRD change proposal.
 
 **Verification:**
 
-- [ ] Manual check: recalculate with PRD expected usage and worst-case attachment limits.
-- [ ] Human approves the per-environment forecasts and budget-control ADR.
+- [x] Manual check: recalculate with PRD expected usage and worst-case attachment limits.
+- [x] Human approves the per-environment forecasts and budget-control ADR.
 
 **Dependencies:** None
 
@@ -537,14 +537,14 @@ topic, revision, history, audit, idempotency, and cost semantics are stable.
 
 **Acceptance criteria:**
 
-- [ ] Ports cover workflows, confirmations, idempotency, history, OAuth state, usage, objects, and secrets.
-- [ ] Key design supports conditional writes, TTL, pagination, and three environments without cross-talk.
-- [ ] Large conversation content is stored by S3 pointer rather than in one DynamoDB item.
+- [x] Ports cover workflows, confirmations, idempotency, history, OAuth state, usage, objects, and secrets.
+- [x] Key design supports conditional writes, TTL, pagination, and three environments without cross-talk.
+- [x] Large conversation content is stored by S3 pointer rather than in one DynamoDB item.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p application repository_contracts`
-- [ ] Human approves `docs/architecture/dynamodb-keys.md`.
+- [x] Tests pass: `cargo test -p application --test repository_contracts`
+- [x] Human approves `docs/architecture/dynamodb-keys.md`.
 
 **Dependencies:** Tasks 8, 15-18
 
@@ -564,14 +564,14 @@ idempotency repositories with optimistic concurrency and atomic reservations.
 
 **Acceptance criteria:**
 
-- [ ] Concurrent transition attempts yield exactly one accepted write.
-- [ ] External actions require an idempotency reservation before invocation.
-- [ ] Audit entries retain owner, actor, source message, revision, and resource IDs.
+- [x] Concurrent transition attempts yield exactly one accepted write.
+- [x] External actions require an idempotency reservation before invocation.
+- [x] Audit entries retain owner, actor, source message, revision, and resource IDs.
 
 **Verification:**
 
-- [ ] Tests pass against DynamoDB Local: `cargo test -p storage dynamodb --features integration`
-- [ ] Fault check: concurrent confirmation test accepts one mutation reservation.
+- [x] Tests pass against DynamoDB Local: `cargo test -p storage dynamodb --features integration`
+- [x] Fault check: concurrent confirmation test accepts one mutation reservation.
 
 **Dependencies:** Task 19
 
@@ -593,13 +593,23 @@ guards.
 
 **Acceptance criteria:**
 
-- [ ] Raw inputs, generated PDFs, and large sanitized histories use separate prefixes and access policies.
-- [ ] OAuth/SMTP/model secrets are retrieved only through secret references and never logged.
-- [ ] Presigned links obey configured expiry and sanitized history excludes credential material.
+- [x] Raw inputs, generated PDFs, and large sanitized histories use separate prefixes. Per-class IAM access policies are deferred to Task 39A under an approved exception.
+- [x] OAuth/SMTP/model secrets are retrieved only through secret references and never logged.
+- [x] Presigned links obey configured expiry and sanitized history excludes credential material.
+- [x] Object publication coordinator proves S3 acceptance before publishing DynamoDB object/history pointers, disambiguates ambiguous S3 outcomes, and fails closed when the object cannot be confirmed.
+- [x] Pagination tokens are authenticated (HMAC-SHA256) and bound to the exact table, repository/query family, scan direction, workflow partition, and sort-key family.
+
+**Approved security exceptions:**
+
+1. **Per-class IAM access policies** — Deferred to Task 39A. No shared environment should deploy before Task 39A provides reviewed prefix-scoped IAM and environment-isolation controls.
+2. **In-process trust boundary** — `SecretValue::new` is `#[doc(hidden)] pub` and `HistorySanitizer::from_secret_values` is `pub` because Rust's visibility system does not allow `pub(crate)` construction across crate boundaries (the `SecretProvider` adapter is in the storage crate). The threat model treats the Lambda process boundary as the trust boundary: all deployed code is trusted, no untrusted code runs in-process. Defense is against external input (webhook payloads, user messages), not in-process code. A future dedicated secrets-runtime crate could provide sealed provenance if cross-crate trust separation is required.
 
 **Verification:**
 
-- [ ] Tests pass against the storage sandbox: `cargo test -p storage s3 secrets history --features integration`
+- [x] Unit tests pass: `cargo test -p storage --lib`
+- [x] Live S3/SSM integration tests pass against LocalStack: `LOCALSTACK_ENDPOINT=http://127.0.0.1:4566 cargo test -p storage --test object_integration --features integration -- --nocapture`
+- [x] Live DynamoDB Local integration tests pass: `cargo test -p storage --test dynamodb_integration --features integration -- --nocapture`
+- [x] Publication coordinator tests pass: `cargo test -p application publication --lib`
 
 **Dependencies:** Task 19
 
@@ -615,9 +625,9 @@ guards.
 
 ## Checkpoint: Safety Core Proven
 
-- [ ] Tasks 14-21 pass required branch and concurrency checks.
-- [ ] Persistence contracts are frozen before handlers and adapters consume them.
-- [ ] Security reviewer approves confirmation, idempotency, and secret boundaries.
+- [x] Tasks 14-21 pass required branch and concurrency checks.
+- [x] Persistence contracts are frozen before handlers and adapters consume them.
+- [x] Security reviewer approves confirmation, idempotency, and secret boundaries.
 
 ## Phase 3: Telegram and OAuth Vertical Slice
 
@@ -628,13 +638,13 @@ events while deduplicating `update_id` and rejecting unsupported chat types.
 
 **Acceptance criteria:**
 
-- [ ] Invalid webhook secret tokens are rejected before parsing business events.
-- [ ] Recorded fixtures normalize mentions, replies, callbacks, media, and commands correctly.
-- [ ] Duplicate and cross-topic updates cannot create or mutate another workflow.
+- [x] Invalid webhook secret tokens are rejected before parsing business events.
+- [x] Recorded fixtures normalize mentions, replies, callbacks, media, and commands correctly.
+- [x] Duplicate and cross-topic updates cannot create or mutate another workflow.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p telegram webhook normalize deduplicate`
+- [x] Tests pass: `cargo test -p telegram webhook normalize deduplicate`
 
 **Dependencies:** Safety Core Proven checkpoint, Tasks 1, 14, 17, 20
 
@@ -655,13 +665,13 @@ separate topic workflow delivery from private OAuth delivery.
 
 **Acceptance criteria:**
 
-- [ ] Start mentions and follow-up `/done`, `/status`, `/correct`, `/confirm`, `/stop` target only the current topic workflow.
-- [ ] Callback replay and stale preview revisions are rejected.
-- [ ] OAuth material cannot pass through topic delivery; Telegram sends use the shared three-attempt executor and persist terminal failures.
+- [x] Start mentions and follow-up `/done`, `/status`, `/correct`, `/confirm`, `/stop` target only the current topic workflow.
+- [x] Callback replay and stale preview revisions are rejected.
+- [x] OAuth material cannot pass through topic delivery; Telegram sends use the shared three-attempt executor and persist terminal failures.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p telegram commands callbacks delivery_privacy`
+- [x] Tests pass: `cargo test -p telegram commands callbacks delivery_privacy`
 
 **Dependencies:** Tasks 16, 22
 
@@ -683,15 +693,15 @@ chat only.
 
 **Acceptance criteria:**
 
-- [ ] State is short-lived, single-use, participant-bound, and replay-resistant.
-- [ ] Refresh tokens enter separate Parameter Store `SecureString` values; token
+- [x] State is short-lived, single-use, participant-bound, and replay-resistant.
+- [x] Refresh tokens enter separate Parameter Store `SecureString` values; token
   values never enter topics or logs.
-- [ ] Revocation pauses Google-dependent work without deleting history; token endpoint calls use the shared retry/ambiguity executor.
+- [x] Revocation pauses Google-dependent work without deleting history; token endpoint calls use the shared retry/ambiguity executor.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p oauth --all-features`
-- [ ] Integration check: mocked connect, refresh, revoke, and reconnect pass.
+- [x] Tests pass: `cargo test -p oauth --all-features`
+- [x] Integration check: mocked connect, refresh, revoke, and reconnect pass.
 
 **Dependencies:** Tasks 6, 21, 23
 
@@ -712,14 +722,14 @@ invoke the tested Telegram and OAuth application paths without domain logic.
 
 **Acceptance criteria:**
 
-- [ ] Handlers return bounded, typed HTTP responses for success and failure.
-- [ ] Webhook acknowledgment does not wait on long-running workflow work.
-- [ ] OAuth callback responses and logs contain no tokens or secret values.
+- [x] Handlers return bounded, typed HTTP responses for success and failure.
+- [x] Webhook acknowledgment does not wait on long-running workflow work.
+- [x] OAuth callback responses and logs contain no tokens or secret values.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p webhook-function -p oauth-function`
-- [ ] Local invoke succeeds for recorded webhook and OAuth fixtures.
+- [x] Tests pass: `cargo test -p webhook-function -p oauth-function`
+- [x] Local invoke succeeds for recorded webhook and OAuth fixtures.
 
 **Dependencies:** Tasks 3, 22-24
 

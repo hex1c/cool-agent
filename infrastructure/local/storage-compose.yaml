@@ -1,0 +1,30 @@
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:3.3.0
+    command: -jar DynamoDBLocal.jar -inMemory -sharedDb
+    ports:
+      - "8000:8000"
+
+  localstack:
+    # Last unauthenticated release line. Current 2026 images require a
+    # LocalStack account token, which would violate the credential-free sandbox.
+    image: localstack/localstack:4.14.0
+    environment:
+      SERVICES: s3,ssm
+      DEFAULT_REGION: us-east-1
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  stepfunctions-local:
+    image: amazon/stepfunctions-local:latest
+    depends_on:
+      - dynamodb-local
+    ports:
+      - "8083:8083"
+    environment:
+      LAMBDA_EXECUTOR: ""

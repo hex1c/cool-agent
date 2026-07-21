@@ -3,7 +3,7 @@ name: Rust
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [dev, staging, prod]
 
 permissions:
   contents: read
@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+      - uses: dtolnay/rust-toolchain@2c7215f132e9ebf062739d9130488b56d53c060c
         with:
           toolchain: 1.97.0
           components: rustfmt, clippy
