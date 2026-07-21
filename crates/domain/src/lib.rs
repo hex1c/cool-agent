@@ -6,6 +6,7 @@ pub mod attachment;
 pub mod authorization;
 pub mod confirmation;
 pub mod contracts;
+pub mod cost;
 pub mod idempotency;
 pub mod identity;
 pub mod money;
@@ -27,6 +28,11 @@ pub use confirmation::{
     ConfirmationError, ConfirmationIssueOutcome, ConfirmationIssuePrecondition,
     ConfirmationIssueRequest, ConfirmationRecord, ConfirmationStatus, ConsumedConfirmation,
     MutationTargetFingerprint, PendingConfirmation, PreviewDigest, TopicMessageReference,
+};
+pub use cost::{
+    BudgetAction, BudgetAuthorization, BudgetBand, BudgetDecision, BudgetDenialReason,
+    BudgetEvaluation, BudgetPolicyError, BudgetThresholds, ConfirmedOperationFunding,
+    apply_safety_margin, evaluate_budget,
 };
 pub use idempotency::{IdempotencyKey, OperationKind, OperationTargetFingerprint};
 pub use retry::{

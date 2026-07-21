@@ -2,9 +2,9 @@
 
 # AWS Monthly Cost Forecast
 
-**Status:** Phase 0 forecast revised with project-owner decisions on 2026-07-15; dated AWS Pricing Calculator evidence and shared-budget ADR approval pending
+**Status:** Phase 0 budget scope revised by the project owner on 2026-07-17; per-environment recalculation, dated AWS Pricing Calculator evidence, and remaining ADR approvals pending
 **Task:** Phase 0, Task 8
-**Budget:** ₹300 per month across development, staging, and production, **excluding GST**
+**Budget:** ₹300 per month for each environment, up to ₹900 account-wide, **excluding GST**
 
 ## Conclusion
 
@@ -27,12 +27,15 @@ risk. Application-level envelope encryption is permitted only if its key
 hierarchy remains in KMS/Parameter Store and receives a separate security
 review. It is not required for the selected baseline.
 
-The principal remaining risk is now indefinite S3 retention. A worst-case 20 MB
-per file with ten files per workflow reaches about 309 GiB after 12 months. At
-the selected US East (N. Virginia) reference price this projects to about ₹863
-per month after the approved 20% margin, so indefinite S3 Standard retention at
-that maximum is not viable under the ₹300 service-cost cap. The final storage
-class/lifecycle decision remains a release blocker.
+The principal remaining risk is now indefinite S3 retention. The current
+worksheet aggregates all three environments and reaches about 309 GiB after 12
+months in the worst-case scenario, projecting about ₹863 per month after the 20%
+margin. That aggregate can no longer be compared with one ₹300 cap. A simple
+equal split would be about ₹288 per environment, but shared account allowances,
+unattributed charges, generated artifacts, requests, and transfer mean that split
+is not authorization evidence. The worksheet must be recalculated per environment
+before approval, and the final storage-class/lifecycle decision remains a release
+blocker.
 
 Sources:
 
@@ -74,18 +77,25 @@ a dated Pricing Calculator estimate for this region before deployment; a
 residency, latency, or service-availability requirement can override the cost
 baseline.
 
-The ₹300 cap applies to AWS service charges before GST. GST is tracked and paid
-separately; it does not reduce the ₹300 operating budget. The worksheet keeps
-the 20% planning safety margin approved by the project owner.
+Each environment's ₹300 cap applies to AWS service charges before GST. GST is
+tracked and paid separately; it does not reduce any environment's ₹300 operating
+budget. The account may therefore reach ₹900 in service charges before GST. The
+worksheet keeps the 20% planning safety margin approved by the project owner.
 
-The forecast uses two scenarios:
+The existing CSV is an account-aggregate estimate created under the former
+combined-cap assumption. It remains useful as source evidence but cannot
+authorize an environment until its costs and conservative shares of account-level
+charges are split into development, staging, and production views.
 
-- **Expected:** 44 production workflows per month plus 11 development and 11
-  staging workflows, or 66 total. It conservatively assumes two 20 MB files
-  (40 MB) per workflow.
-- **Worst-case attachment:** 44 workflows in each environment, or 132 total,
-  where every workflow accepts ten 20 MB files (200 MB). This is the enforced
-  maximum, not a typical-use claim.
+The forecast uses two scenarios that must be reported both per environment and
+as a read-only account roll-up:
+
+- **Expected:** 44 production workflows per month, 11 development workflows,
+  and 11 staging workflows. Each workflow conservatively assumes two 20 MB files
+  (40 MB).
+- **Worst-case attachment:** 44 workflows in each environment, where every
+  workflow accepts ten 20 MB files (200 MB). This is the enforced maximum, not a
+  typical-use claim.
 
 There are three employees using Google OAuth. Their maximum environment-isolated
 refresh-token count is nine, with no monthly standard-parameter storage charge.
@@ -112,9 +122,9 @@ The forecast uses the owner-approved conservative conversion:
 service-cost INR = USD list cost × 100
 ```
 
-GST is excluded from the ₹300 service-cost cap and shown separately on the
-actual AWS invoice. The deployment gate must use the same ₹100/USD basis unless
-a later human-approved revision changes it.
+GST is excluded from each environment's ₹300 service-cost cap and shown
+separately on the actual AWS invoice. Each deployment gate must use the same
+₹100/USD basis unless a later human-approved revision changes it.
 
 Sources:
 
@@ -148,21 +158,24 @@ Sources:
 
 ### S3 retention
 
-At 20 MB per file, expected retention adds about 2.58 GiB per month and the
-maximum scenario adds about 25.78 GiB per month. With indefinite retention,
-S3 Standard storage grows approximately as follows before generated artifacts,
-versions, requests, and transfer:
+At 20 MB per file, account-wide expected retention adds about 2.58 GiB per month
+and the account-wide maximum scenario adds about 25.78 GiB per month. With
+indefinite retention, S3 Standard storage grows approximately as follows before
+generated artifacts, versions, requests, and transfer:
 
 | Scenario | Month 1 | Month 6 | Month 12 |
 | --- | ---: | ---: | ---: |
-| Expected retained attachments | 2.58 GiB | 15.47 GiB | 30.94 GiB |
-| Worst-case retained attachments | 25.78 GiB | 154.69 GiB | 309.38 GiB |
+| Account expected retained attachments | 2.58 GiB | 15.47 GiB | 30.94 GiB |
+| One-environment worst-case attachments | 8.59 GiB | 51.56 GiB | 103.13 GiB |
+| Account worst-case retained attachments | 25.78 GiB | 154.69 GiB | 309.38 GiB |
 
-The expected 12-month scenario remains below the cap in the worksheet. The
-worst-case scenario rises to about ₹436/month at month 6 and ₹863/month at month
-12 after the 20% margin. Retention remains indefinite, but S3 Standard cannot
-be its permanent class at maximum usage; the release needs a priced archival
-lifecycle and retrieval policy, or a revised cap/attachment policy.
+The account worst-case scenario rises to about ₹436/month at month 6 and
+₹863/month at month 12 after the 20% margin. Those account totals are below the
+₹900 aggregate ceiling but do not prove that each environment remains below its
+₹300 cap. Per-environment allocation must include its own usage and a
+conservative share of account-level charges. Retention remains indefinite, so
+release still needs a priced archival lifecycle and retrieval policy or a
+revised cap/attachment policy.
 
 Source: <https://aws.amazon.com/s3/pricing/>
 
@@ -212,13 +225,15 @@ Before approving the deployment:
 3. Count deployed parameters, KMS requests, alarms, tables, buckets, and log
    groups from the SAM template.
 4. Show gross list cost, recurring allowances, net service cost, 20% safety
-   margin, and GST separately; only net service cost plus margin is compared
-   with the ₹300 cap.
-5. Forecast months 1, 6, and 12. Retention is indefinite, but the approved
-   planning horizon is 12 months; any later forecast is required when the
-   lifecycle or cap changes.
-6. Confirm new intake suspends at ₹270 after the safety margin and that no
-   decision reaches the ₹300 hard cap.
+   margin, allocated account-level charges, and GST separately for each
+   environment; only that environment's net service cost plus margin is compared
+   with its ₹300 cap.
+5. Forecast months 1, 6, and 12 separately for development, staging, and
+   production, then provide a non-authoritative account roll-up. Retention is
+   indefinite, but the approved planning horizon is 12 months; any later forecast
+   is required when the lifecycle or cap changes.
+6. Confirm each environment suspends new intake at ₹270 after the safety margin
+   and that no decision reaches that environment's ₹300 hard cap.
 7. Record the archival lifecycle decision or approved replacement cap/policy.
 
 ## Approval
@@ -227,8 +242,10 @@ Before approving the deployment:
 - [x] Expected and worst-case usage approved: two/ten files at 20 MB each.
 - [x] Secret-storage architecture and cost approved: separate standard
   Parameter Store `SecureString` values using the AWS managed key.
-- [ ] Shared-budget ADR approved.
-- [x] ₹300 excludes GST; USD/INR is fixed at ₹100 for this forecast.
+- [ ] Per-environment budget-control ADR satisfies its remaining approval conditions.
+- [x] Budget scope approved: ₹300 per environment, up to ₹900 account-wide,
+  excluding GST; project owner, 2026-07-17.
+- [x] USD/INR is fixed at ₹100 for this forecast.
 - [x] The Parameter Store replacement is approved; unrelated credential
   bundling and application-only key handling are rejected.
 - [ ] Retention growth remains viable or the S3 archival lifecycle has an

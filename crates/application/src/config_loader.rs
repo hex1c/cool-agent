@@ -224,6 +224,13 @@ fn validate_budget(budget: &BudgetConfig) -> Result<(), ConfigError> {
             reason: "must be lower than the monthly cap".to_owned(),
         });
     }
+    let workflow_spend_limit = budget.monthly_cap_micro_inr - budget.operational_reserve_micro_inr;
+    if budget.suspension_threshold_micro_inr >= workflow_spend_limit {
+        return Err(ConfigError::InvalidValue {
+            field: "budget.operationalReserveMicroInr".to_owned(),
+            reason: "must leave workflow spend capacity above the suspension threshold".to_owned(),
+        });
+    }
     Ok(())
 }
 
