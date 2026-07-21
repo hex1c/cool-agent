@@ -1,0 +1,28 @@
+[workspace]
+resolver = "3"
+members = ["crates/domain", "crates/application"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
+license = "UNLICENSED"
+publish = false
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+warnings = "deny"
+
+[workspace.lints.clippy]
+all = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+indexing_slicing = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "z"
+strip = true

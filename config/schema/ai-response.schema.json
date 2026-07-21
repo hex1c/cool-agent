@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novus.invalid/schema/ai-response.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "requestId",
+    "outcome",
+    "model",
+    "checkpoint",
+    "extraction",
+    "quotation",
+    "draft",
+    "calendar",
+    "error"
+  ],
+  "properties": {
+    "contractVersion": { "const": "novus.ai.v1" },
+    "requestId": { "type": "string", "minLength": 1 },
+    "outcome": {
+      "enum": ["success", "invalid", "retryable_error", "terminal_error"]
+    },
+    "model": { "$ref": "#/$defs/model" },
+    "checkpoint": { "$ref": "#/$defs/checkpoint" },
+    "extraction": { "$ref": "#/$defs/extraction" },
+    "quotation": { "$ref": "#/$defs/quotation" },
+    "draft": { "$ref": "#/$defs/draft" },
+    "calendar": { "$ref": "#/$defs/calendar" },
+    "error": { "$ref": "#/$defs/error" }
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "modelId", "promptVersion"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "promptVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "checkpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "historyDigest", "sanitizedObjectRef"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 0 },
+        "historyDigest": { "type": "string", "minLength": 1 },
+        "sanitizedObjectRef": { "type": ["string", "null"] }
+      }
+    },
+    "extraction": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["customer", "items", "currency"],
+      "properties": {
+        "customer": { "$ref": "#/$defs/customer" },
+        "items": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/item" }
+        },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "customer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "address", "contact"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "address": { "type": ["string", "null"] },
+        "contact": { "type": ["string", "null"] }
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["description", "quantity", "unitPriceMicroInr"],
+      "properties": {
+        "description": { "type": "string", "minLength": 1 },
+        "quantity": { "type": "string", "minLength": 1 },
+        "unitPriceMicroInr": { "type": "integer" }
+      }
+    },
+    "quotation": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "currency",
+        "subtotalMicroInr",
+        "taxMicroInr",
+        "totalMicroInr",
+        "taxRateBps",
+        "assumptions"
+      ],
+      "properties": {
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "subtotalMicroInr": { "type": "integer" },
+        "taxMicroInr": { "type": "integer" },
+        "totalMicroInr": { "type": "integer" },
+        "taxRateBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "assumptions": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "draft": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["subject", "body"],
+      "properties": {
+        "subject": { "type": "string", "minLength": 1 },
+        "body": { "type": "string", "minLength": 1 }
+      }
+    },
+    "calendar": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "start",
+        "end",
+        "timezone",
+        "attendees",
+        "sendInvitations"
+      ],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "start": { "type": "string", "minLength": 1 },
+        "end": { "type": "string", "minLength": 1 },
+        "timezone": { "type": "string", "minLength": 1 },
+        "attendees": {
+          "type": "array",
+          "items": { "type": "string", "format": "email" }
+        },
+        "sendInvitations": { "type": "boolean" }
+      }
+    },
+    "error": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["code", "message", "retryable"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "retryable": { "type": "boolean" }
+      }
+    }
+  }
+}

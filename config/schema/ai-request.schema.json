@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novus.invalid/schema/ai-request.v1.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "requestId",
+    "workflowId",
+    "operation",
+    "model",
+    "history",
+    "input"
+  ],
+  "properties": {
+    "contractVersion": { "const": "novus.ai.v1" },
+    "requestId": { "type": "string", "minLength": 1 },
+    "workflowId": { "type": "string", "minLength": 1 },
+    "operation": {
+      "enum": ["extraction", "quotation_calculation", "draft", "calendar"]
+    },
+    "model": { "$ref": "#/$defs/model" },
+    "history": { "$ref": "#/$defs/history" },
+    "input": { "$ref": "#/$defs/input" }
+  },
+  "$defs": {
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "modelId", "promptVersion"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "promptVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "history": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sequence", "historyDigest", "sanitizedObjectRef"],
+      "properties": {
+        "sequence": { "type": "integer", "minimum": 0 },
+        "historyDigest": { "type": "string", "minLength": 1 },
+        "sanitizedObjectRef": { "type": ["string", "null"] }
+      }
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instruction", "attachments"],
+      "properties": {
+        "instruction": { "type": "string", "minLength": 1 },
+        "attachments": {
+          "type": "array",
+          "maxItems": 10,
+          "items": { "$ref": "#/$defs/attachment" }
+        }
+      }
+    },
+    "attachment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["objectRef", "mediaType", "checksum", "extractedText"],
+      "properties": {
+        "objectRef": { "type": "string", "minLength": 1 },
+        "mediaType": { "type": "string", "minLength": 1 },
+        "checksum": { "type": "string", "minLength": 1 },
+        "extractedText": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

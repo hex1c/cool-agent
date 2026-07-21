@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "status": "layout_contract_approved_renderer_pending",
+  "source": {
+    "path": "docs/sample-quotation.pdf",
+    "sha256": "1c11d46b7fc9552253ed4a3ba71368219061f378ab904dbb83db10e2493a56a8",
+    "page_count": 1,
+    "producer": "react-pdf"
+  },
+  "coordinates": {
+    "unit": "pt",
+    "origin": "top-left",
+    "page": {
+      "width": 595.280029,
+      "height": 841.890015,
+      "rotation_degrees": 0,
+      "outer_margin": 24.0
+    },
+    "regions": {
+      "title_strip": { "x": 24.0, "y": 24.0, "width": 547.280029, "height": 19.369999 },
+      "company_identity": { "x": 29.5, "y": 47.87, "width": 242.5, "height": 72.7 },
+      "quotation_metadata": { "x": 302.14, "y": 51.0, "width": 263.64, "height": 58.0 },
+      "customer_details": { "x": 29.5, "y": 132.0, "width": 242.5, "height": 83.5 },
+      "shipping_dispatch": { "x": 302.14, "y": 117.0, "width": 263.64, "height": 94.0 },
+      "line_item_table": { "x": 24.0, "y": 217.97, "width": 547.280029, "height": 118.36 },
+      "item_quantity_footer": { "x": 24.0, "y": 336.33, "width": 547.280029, "height": 12.5 },
+      "tax_total_summary": { "x": 390.34, "y": 348.33, "width": 180.94, "height": 55.0 },
+      "amount_in_words": { "x": 24.0, "y": 403.33, "width": 547.280029, "height": 11.62 },
+      "bank_signature": { "x": 24.0, "y": 414.23, "width": 547.280029, "height": 100.85 },
+      "terms": { "x": 276.17, "y": 523.0, "width": 295.11, "height": 170.0 },
+      "footer": { "x": 24.0, "y": 794.07, "width": 547.280029, "height": 29.82 }
+    },
+    "image_slots": {
+      "company_logo": { "x": 29.5, "y": 47.87, "width": 72.0, "height": 71.641792 },
+      "signature": { "x": 466.780013, "y": 430.73, "width": 99.0, "height": 60.550457 },
+      "footer_brand": { "x": 483.758301, "y": 796.89, "width": 87.521736, "height": 27.0 },
+      "background_watermark": { "x": 47.640015, "y": 158.945007, "width": 500.0, "height": 500.0 }
+    },
+    "table": {
+      "header_top": 218.97,
+      "header_bottom": 234.62,
+      "body_bottom": 336.33,
+      "text_inset": 5.5,
+      "minimum_row_line_height": 14.13,
+      "single_line_baselines": [244.13, 260.06, 274.19, 288.32, 302.45, 316.58, 330.71],
+      "columns": [
+        { "name": "sequence", "left": 24.0, "right": 48.23, "alignment": "left" },
+        { "name": "item", "left": 48.23, "right": 202.09, "alignment": "left" },
+        { "name": "hsn_sac", "left": 202.09, "right": 256.59, "alignment": "center" },
+        { "name": "rate_per_item", "left": 256.59, "right": 329.29, "alignment": "right" },
+        { "name": "quantity", "left": 329.29, "right": 383.81, "alignment": "right" },
+        { "name": "taxable_value", "left": 383.81, "right": 444.39, "alignment": "right" },
+        { "name": "tax_amount", "left": 444.39, "right": 511.03, "alignment": "right" },
+        { "name": "amount", "left": 511.03, "right": 571.280029, "alignment": "right" }
+      ]
+    }
+  },
+  "style": {
+    "colors": {
+      "primary_dark": "#1D1D1F",
+      "secondary_dark": "#333333",
+      "accent": "#276EF1"
+    },
+    "fonts": {
+      "label": "SFUIDisplay-Semibold",
+      "emphasis": "SFUIDisplay-Bold",
+      "body": "SFUIText-Regular",
+      "asset_status": "pending_licensing_and_hash_approval"
+    }
+  },
+  "overflow": {
+    "strategy": "additional_pages",
+    "shrink_financial_text": false,
+    "truncate_financial_text": false,
+    "repeat_title_and_table_header": true,
+    "keep_financial_summary_together": true,
+    "keep_bank_signature_together": true,
+    "terms_may_continue": true,
+    "pathological_item_split_policy": "line_boundary_with_continuation_label_pending_approval"
+  },
+  "normal_case": {
+    "fixture_classification": "synthetic",
+    "company": {
+      "name": "Novus Test Company",
+      "tax_id": "29AAAAA0000A1Z5",
+      "address_lines": ["1 Test Road", "Bengaluru, Karnataka 560001"],
+      "contact": "+91 00000 00000",
+      "bank_name": "Test Bank",
+      "account_reference": "TEST-ACCOUNT-0001",
+      "routing_reference": "TEST-ROUTING"
+    },
+    "quotation": {
+      "numbering_policy": {
+        "format": "<PREFIX>-<FINANCIAL_YEAR>-<ZERO_PADDED_SEQUENCE>",
+        "prefix": "QTN",
+        "financial_year": "2025-26",
+        "sequence_width": 4,
+        "sequence": 1,
+        "reservation_point": "first_complete_preview",
+        "reuse_cancelled_numbers": false,
+        "environment_marker_required_outside_production": true
+      },
+      "date_policy": {
+        "stored_format": "YYYY-MM-DD",
+        "default_source": "trusted_clock_in_company_timezone",
+        "custom_source": "ai_extraction_with_source_attribution_and_human_confirmation",
+        "model_clock_allowed": false
+      },
+      "number": "QTN-2025-26-0001",
+      "date": "2026-01-15",
+      "valid_until": "2026-02-14",
+      "place_of_supply": "29-KARNATAKA",
+      "currency": "INR",
+      "copy_label": "ORIGINAL FOR RECIPIENT"
+    },
+    "customer": {
+      "name": "Sanitized Example Customer",
+      "tax_id": "29BBBBB0000B1Z5",
+      "billing_address_lines": ["2 Example Avenue", "Bengaluru, Karnataka 560002"],
+      "shipping_address_lines": ["3 Sample Street", "Bengaluru, Karnataka 560003"]
+    },
+    "dispatch_from_lines": ["Novus Test Company", "Bengaluru, Karnataka 560001"],
+    "items": [
+      {
+        "sequence": 1,
+        "description": "Sanitized sample item",
+        "hsn_sac": "00000000",
+        "quantity": "2",
+        "unit": "EA",
+        "rate_minor": 10000,
+        "taxable_minor": 20000,
+        "tax_components": [
+          { "name": "CGST", "basis_points": 250, "amount_minor": 500 },
+          { "name": "SGST", "basis_points": 250, "amount_minor": 500 }
+        ],
+        "total_minor": 21000
+      }
+    ],
+    "totals": {
+      "item_count": 1,
+      "quantity": "2 EA",
+      "taxable_minor": 20000,
+      "tax_minor": 1000,
+      "grand_total_minor": 21000,
+      "amount_in_words": "INR Two Hundred Ten Rupees Only"
+    },
+    "terms": [
+      "A synthetic deposit term for visual testing only.",
+      "A synthetic completion term for visual testing only."
+    ]
+  },
+  "verification": {
+    "golden_pdf": "tests/fixtures/quotation/golden-v1.pdf",
+    "golden_pdf_status": "pending_renderer_prototype_and_visual_approval",
+    "anchor_tolerance_pt": 0.75,
+    "baseline_tolerance_pt": 1.0,
+    "raster_dpi": null,
+    "color_threshold": null,
+    "masked_regions": [],
+    "visual_overlay_status": "pending"
+  }
+}

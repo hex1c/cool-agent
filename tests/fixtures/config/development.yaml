@@ -1,0 +1,22 @@
+schemaVersion: novus.config.v1
+kind: environment
+environment: development
+telegram:
+  botUsername: novus_dev_bot
+  forumChatId: -1001234567890
+  botTokenRef: /novus/development/telegram/bot-token
+  webhookSecretRef: /novus/development/telegram/webhook-secret
+  privacyMode: true
+google:
+  clientId: sanitized-development-client.apps.googleusercontent.com
+  clientSecretRef: /novus/development/google/client-secret
+  callbackUri: https://dev.example.test/oauth/google/callback
+  scopes:
+    - openid
+    - email
+    - https://www.googleapis.com/auth/drive.file
+    - https://www.googleapis.com/auth/calendar.events
+email:
+  secretRef: /novus/development/smtp/credentials
+ai:
+  secretRef: /novus/development/ai/provider-key

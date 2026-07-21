@@ -8,6 +8,10 @@ node_modules/
 dist/
 *.tsbuildinfo
 
+# ── Python ───────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+
 # ── Pi ───────────────────────────────────────────────────────────────────
 .pi/
 .pi-subagents/
@@ -15,6 +19,9 @@ dist/
 # ── AWS SAM ──────────────────────────────────────────────────────────────
 .aws-sam/
 samconfig.toml
+infrastructure/local/data/
+*.sqlite
+*.sqlite3
 
 # ── IDE / editors ────────────────────────────────────────────────────────
 .vscode/
@@ -22,6 +29,13 @@ samconfig.toml
 *.swp
 *.swo
 *~
+
+# ── Secrets ──────────────────────────────────────────────────────────────
+telpass
+googleoauth
+*.pem
+.env*
+.credentials/
 
 # ── OS / filesystem ──────────────────────────────────────────────────────
 .DS_Store

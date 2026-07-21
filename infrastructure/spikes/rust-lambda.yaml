@@ -1,0 +1,17 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Novus Rust 1.97 cargo-lambda SAM build spike
+
+Resources:
+  RustBuildSpike:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../../functions/build-spike
+      Runtime: provided.al2023
+      Handler: bootstrap
+      MemorySize: 128
+      Timeout: 10
+      Architectures:
+        - x86_64
+    Metadata:
+      BuildMethod: makefile

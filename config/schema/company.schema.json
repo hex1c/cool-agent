@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://novus.invalid/schema/company.v1.json",
+  "title": "Novus deployment configuration v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "novus.config.v1" },
+    "kind": { "enum": ["company", "environment"] },
+    "environment": { "enum": ["development", "staging", "production"] },
+    "company": { "$ref": "#/$defs/company" },
+    "quotation": { "$ref": "#/$defs/quotation" },
+    "drive": { "$ref": "#/$defs/drive" },
+    "calendar": { "$ref": "#/$defs/calendar" },
+    "email": { "$ref": "#/$defs/email" },
+    "ai": { "$ref": "#/$defs/ai" },
+    "attachments": { "$ref": "#/$defs/attachments" },
+    "timeouts": { "$ref": "#/$defs/timeouts" },
+    "retry": { "$ref": "#/$defs/retry" },
+    "links": { "$ref": "#/$defs/links" },
+    "budget": { "$ref": "#/$defs/budget" },
+    "telegram": { "$ref": "#/$defs/telegram" },
+    "google": { "$ref": "#/$defs/google" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "kind": { "const": "company" } },
+        "required": ["kind"]
+      },
+      "then": {
+        "required": [
+          "schemaVersion",
+          "kind",
+          "company",
+          "quotation",
+          "drive",
+          "calendar",
+          "email",
+          "ai",
+          "attachments",
+          "timeouts",
+          "retry",
+          "links",
+          "budget"
+        ],
+        "allOf": [
+          {
+            "properties": {
+              "company": {
+                "required": [
+                  "legalName",
+                  "displayName",
+                  "contactEmail",
+                  "contactPhone",
+                  "address",
+                  "logoRef",
+                  "signatureRef"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "quotation": {
+                "required": [
+                  "templateVersion",
+                  "referencePdf",
+                  "currency",
+                  "taxRateBps",
+                  "validityDays",
+                  "numberPrefix",
+                  "numberPadding",
+                  "terms",
+                  "fieldMapping"
+                ]
+              }
+            }
+          },
+          { "properties": { "drive": { "required": ["defaultFolderId"] } } },
+          {
+            "properties": {
+              "calendar": {
+                "required": [
+                  "timezone",
+                  "defaultCalendarId",
+                  "defaultReminderMinutes",
+                  "sendInvitationsByDefault"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "email": {
+                "required": [
+                  "host",
+                  "port",
+                  "senderAddress",
+                  "secretRef",
+                  "linkExpiryDays"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "ai": {
+                "required": [
+                  "provider",
+                  "modelId",
+                  "reasoning",
+                  "vision",
+                  "secretRef",
+                  "promptVersion"
+                ]
+              }
+            }
+          },
+          {
+            "properties": {
+              "attachments": {
+                "required": ["maxCount", "maxBytes", "allowedMimeTypes"]
+              }
+            }
+          },
+          {
+            "properties": {
+              "timeouts": {
+                "required": ["collectionSeconds", "clarificationSeconds"]
+              }
+            }
+          },
+          {
+            "properties": {
+              "retry": {
+                "required": [
+                  "maxAttempts",
+                  "backoffBaseMs",
+                  "backoffMaxMs",
+                  "jitterBps"
+                ]
+              }
+            }
+          },
+          { "properties": { "links": { "required": ["s3ExpirySeconds"] } } },
+          {
+            "properties": {
+              "budget": {
+                "required": [
+                  "monthlyCapMicroInr",
+                  "warningThresholdMicroInr",
+                  "suspensionThresholdMicroInr",
+                  "operationalReserveMicroInr",
+                  "safetyMarginBps"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "company": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "legalName": { "type": "string", "minLength": 1 },
+        "displayName": { "type": "string", "minLength": 1 },
+        "contactEmail": { "type": "string", "format": "email" },
+        "contactPhone": { "type": "string", "minLength": 1 },
+        "address": { "type": "string", "minLength": 1 },
+        "logoRef": { "type": "string", "minLength": 1 },
+        "signatureRef": { "type": "string", "minLength": 1 }
+      }
+    },
+    "quotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "templateVersion": { "type": "string", "minLength": 1 },
+        "referencePdf": { "type": "string", "minLength": 1 },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "taxRateBps": { "type": "integer", "minimum": 0, "maximum": 10000 },
+        "validityDays": { "type": "integer", "minimum": 1, "maximum": 365 },
+        "numberPrefix": { "type": "string", "minLength": 1, "maxLength": 20 },
+        "numberPadding": { "type": "integer", "minimum": 1, "maximum": 12 },
+        "terms": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "fieldMapping": {
+          "type": "object",
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "drive": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "defaultFolderId": { "type": "string", "minLength": 1 },
+        "sharedDriveId": { "type": ["string", "null"] }
+      }
+    },
+    "calendar": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timezone": { "type": "string", "minLength": 1 },
+        "defaultCalendarId": { "type": "string", "minLength": 1 },
+        "defaultReminderMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 40320
+        },
+        "sendInvitationsByDefault": { "type": "boolean" }
+      }
+    },
+    "email": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "senderAddress": { "type": "string", "format": "email" },
+        "secretRef": { "$ref": "#/$defs/secretRef" },
+        "linkExpiryDays": { "const": 7 },
+        "templateRef": { "type": ["string", "null"] }
+      }
+    },
+    "ai": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "minLength": 1 },
+        "modelId": { "type": "string", "minLength": 1 },
+        "reasoning": { "enum": ["basic"] },
+        "vision": { "type": "boolean" },
+        "secretRef": { "$ref": "#/$defs/secretRef" },
+        "promptVersion": { "type": "string", "minLength": 1 }
+      }
+    },
+    "attachments": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxCount": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "maxBytes": { "type": "integer", "minimum": 1, "maximum": 20971520 },
+        "allowedMimeTypes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "timeouts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "collectionSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "clarificationSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        }
+      }
+    },
+    "retry": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 3 },
+        "backoffBaseMs": { "type": "integer", "minimum": 1, "maximum": 60000 },
+        "backoffMaxMs": { "type": "integer", "minimum": 1, "maximum": 300000 },
+        "jitterBps": { "type": "integer", "minimum": 0, "maximum": 10000 }
+      }
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "s3ExpirySeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "monthlyCapMicroInr": { "const": 300000000 },
+        "warningThresholdMicroInr": { "const": 240000000 },
+        "suspensionThresholdMicroInr": { "const": 270000000 },
+        "operationalReserveMicroInr": {
+          "type": "integer",
+          "minimum": 0,
+          "exclusiveMaximum": 300000000
+        },
+        "safetyMarginBps": { "const": 2000 }
+      }
+    },
+    "telegram": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "botUsername": { "type": "string", "pattern": "^[A-Za-z0-9_]{5,32}$" },
+        "forumChatId": { "type": "integer" },
+        "botTokenRef": { "$ref": "#/$defs/secretRef" },
+        "webhookSecretRef": { "$ref": "#/$defs/secretRef" },
+        "privacyMode": { "const": true }
+      }
+    },
+    "google": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "clientId": { "type": "string", "minLength": 1 },
+        "clientSecretRef": { "$ref": "#/$defs/secretRef" },
+        "callbackUri": { "type": "string", "pattern": "^https://" },
+        "scopes": {
+          "type": "array",
+          "minItems": 4,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "secretRef": {
+      "type": "string",
+      "pattern": "^/novus/(development|staging|production)/[A-Za-z0-9/_-]+$"
+    }
+  }
+}
