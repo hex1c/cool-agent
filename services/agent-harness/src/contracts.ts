@@ -6,10 +6,7 @@ import responseSchema from "../../../config/schema/ai-response.schema.json" with
 export const CONTRACT_VERSION = "novus.ai.v1" as const;
 
 export type Operation =
-  | "extraction"
-  | "quotation_calculation"
-  | "draft"
-  | "calendar";
+  "extraction" | "quotation_calculation" | "draft" | "calendar";
 
 export interface ModelVersion {
   provider: string;
