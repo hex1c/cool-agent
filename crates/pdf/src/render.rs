@@ -629,19 +629,9 @@ impl QuotationRenderer {
             }
         }
 
-        if let Some(logo) = &doc.company.logo_ref
-            && !logo.is_empty()
-        {
-            self.text(
-                ops,
-                &format!("[logo: {logo}]"),
-                region.x,
-                region.y + region.height - 8.0,
-                FONT_SIZE_BODY,
-                BuiltinFont::Helvetica,
-                primary,
-            );
-        }
+        // The company logo is an image slot; Version 1 does not embed images, so
+        // the slot is left empty rather than drawing a placeholder that overlaps
+        // the evenly distributed text lines.
         Ok(())
     }
 
