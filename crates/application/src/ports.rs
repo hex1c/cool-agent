@@ -7,6 +7,7 @@ pub use crate::external_operation::OperationJournal;
 
 const MAX_IDENTIFIER_LENGTH: usize = 128;
 const MAX_PAGE_TOKEN_LENGTH: usize = 2_048;
+const MAX_PRESIGNED_LINK_LENGTH: usize = 8_192;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PortValueError {
@@ -14,6 +15,7 @@ pub enum PortValueError {
     TooLong { kind: &'static str, maximum: usize },
     InvalidCharacters { kind: &'static str },
     InvalidSecretReference,
+    InvalidPresignedObjectLink,
     Identity(IdentityError),
 }
 
@@ -208,12 +210,66 @@ pub struct OAuthStateRecord {
     pub expires_at: WorkflowTimestamp,
 }
 
+/// A presigned S3 URL is a bearer credential. It is redacted by default and
+/// can only be accessed through the explicit `as_str` method.
+pub struct PresignedObjectLink(String);
+
+impl PresignedObjectLink {
+    pub fn new(value: impl Into<String>) -> Result<Self, PortValueError> {
+        let value = value.into();
+        if !(value.starts_with("https://") || value.starts_with("http://"))
+            || value.len() > MAX_PRESIGNED_LINK_LENGTH
+            || value
+                .bytes()
+                .any(|byte| byte.is_ascii_control() || byte.is_ascii_whitespace())
+        {
+            return Err(PortValueError::InvalidPresignedObjectLink);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Debug for PresignedObjectLink {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("PresignedObjectLink([REDACTED])")
+    }
+}
+
+impl Drop for PresignedObjectLink {
+    fn drop(&mut self) {
+        let mut bytes = std::mem::take(&mut self.0).into_bytes();
+        bytes.fill(0);
+    }
+}
+
 #[allow(async_fn_in_trait)]
 pub trait ObjectStore {
     type Error: Display;
 
     async fn put(&self, object: &StoredObject, bytes: &[u8]) -> Result<(), Self::Error>;
+    /// Retrieve an object's bytes. Implementations **must** re-verify the
+    /// content against `object.byte_length` and `object.sha256` before
+    /// returning `Ok`; a mismatch must produce an error. This contract is
+    /// relied upon by the publication coordinator's ambiguous-put
+    /// disambiguation path.
     async fn get(&self, object: &StoredObject) -> Result<Vec<u8>, Self::Error>;
+}
+
+/// Capability for generating short-lived artifact retrieval links. The expiry
+/// is fixed by the adapter's validated deployment configuration, not supplied
+/// by an untrusted caller.
+#[allow(async_fn_in_trait)]
+pub trait ArtifactLinkSigner {
+    type Error: Display;
+
+    async fn presign_artifact(
+        &self,
+        object: &StoredObject,
+    ) -> Result<PresignedObjectLink, Self::Error>;
 }
 
 #[allow(async_fn_in_trait)]

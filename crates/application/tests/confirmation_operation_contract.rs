@@ -118,8 +118,8 @@ fn operation_key(
     target: [u8; 32],
 ) -> IdempotencyKey {
     IdempotencyKey::new(
-        consumption.transition.workflow.id().clone(),
-        consumption.transition.workflow.revision(),
+        consumption.transition().workflow.id().clone(),
+        consumption.transition().workflow.revision(),
         kind,
         OperationTargetFingerprint::new(target),
     )
@@ -148,6 +148,7 @@ fn confirmed_actions_accept_only_bound_operation_kinds() -> Result<(), Box<dyn s
         let consumption = consumed(action)?;
         let key = operation_key(&consumption, kind, [2; 32]);
         let request = ConsumeAndPrepareRequest::new(consumption, key)?;
+        assert_eq!(request.validate(), Ok(()));
         let outcome = ConsumeAndPrepareOutcome::from(request);
         assert_eq!(
             outcome.authorization_audit.actor,
@@ -165,7 +166,7 @@ fn confirmation_operation_binding_rejects_mismatches_before_storage()
 
     let wrong_workflow = IdempotencyKey::new(
         WorkflowId::new("another-workflow")?,
-        consumption.transition.workflow.revision(),
+        consumption.transition().workflow.revision(),
         OperationKind::GoogleWrite,
         OperationTargetFingerprint::new([2; 32]),
     );
@@ -175,10 +176,10 @@ fn confirmation_operation_binding_rejects_mismatches_before_storage()
     ));
 
     let wrong_revision = IdempotencyKey::new(
-        consumption.transition.workflow.id().clone(),
+        consumption.transition().workflow.id().clone(),
         WorkflowRevision::new(
             consumption
-                .transition
+                .transition()
                 .workflow
                 .revision()
                 .get()

@@ -149,12 +149,12 @@ Google-account behavior.
 **Acceptance criteria:**
 
 - [x] Exact Drive, Sheets, Docs, and Calendar scopes are recorded; Gmail is absent.
-- [ ] State replay, expiry, revocation, and refresh behavior are demonstrated.
+- [x] State replay, expiry, revocation, and refresh behavior are demonstrated.
 - [x] Test-user/verification requirements and secret-storage costs are documented.
 
 **Verification:**
 
-- [ ] Manual check: connect, refresh, revoke, and reconnect a development account.
+- [x] Manual check: connect, refresh, revoke, and reconnect a development account.
 - [x] Human approves `docs/spikes/google-oauth.md`.
 
 **Dependencies:** None; requires development Google OAuth credentials.
@@ -173,13 +173,13 @@ out, and connection-dropped sends so retries cannot duplicate email.
 
 **Acceptance criteria:**
 
-- [ ] The report records stable message identifiers and observable acceptance points.
+- [x] The report records stable message identifiers and observable acceptance points.
 - [x] Timeout cases are classified as retryable or manual-review ambiguity.
-- [ ] A safe idempotency strategy is approved.
+- [x] A safe idempotency strategy is approved.
 
 **Verification:**
 
-- [ ] Manual check: test against a non-production mailbox and verify received-message counts.
+- [x] Manual check: test against a non-production mailbox and verify received-message counts.
 - [x] Human approves `docs/spikes/hostinger-smtp.md`.
 
 **Dependencies:** None; requires development Hostinger credentials.
@@ -200,13 +200,13 @@ account ceiling.
 **Acceptance criteria:**
 
 - [x] The worksheet includes Step Functions, Lambda, API Gateway, DynamoDB, S3, Parameter Store/KMS, logs, alarms, retention growth, and safety margin.
-- [ ] An approved ADR defines isolated per-environment usage aggregation, shared-cost attribution, ownership, consistency, fail-closed behavior, and least-privilege access.
-- [ ] Warning, suspension, and deployment-block thresholds remain feasible; an unaffordable design produces a PRD change proposal.
+- [x] An approved ADR defines isolated per-environment usage aggregation, shared-cost attribution, ownership, consistency, fail-closed behavior, and least-privilege access.
+- [x] Warning, suspension, and deployment-block thresholds remain feasible; an unaffordable design produces a PRD change proposal.
 
 **Verification:**
 
-- [ ] Manual check: recalculate with PRD expected usage and worst-case attachment limits.
-- [ ] Human approves the per-environment forecasts and budget-control ADR.
+- [x] Manual check: recalculate with PRD expected usage and worst-case attachment limits.
+- [x] Human approves the per-environment forecasts and budget-control ADR.
 
 **Dependencies:** None
 
@@ -564,14 +564,14 @@ idempotency repositories with optimistic concurrency and atomic reservations.
 
 **Acceptance criteria:**
 
-- [ ] Concurrent transition attempts yield exactly one accepted write.
-- [ ] External actions require an idempotency reservation before invocation.
-- [ ] Audit entries retain owner, actor, source message, revision, and resource IDs.
+- [x] Concurrent transition attempts yield exactly one accepted write.
+- [x] External actions require an idempotency reservation before invocation.
+- [x] Audit entries retain owner, actor, source message, revision, and resource IDs.
 
 **Verification:**
 
-- [ ] Tests pass against DynamoDB Local: `cargo test -p storage dynamodb --features integration`
-- [ ] Fault check: concurrent confirmation test accepts one mutation reservation.
+- [x] Tests pass against DynamoDB Local: `cargo test -p storage dynamodb --features integration`
+- [x] Fault check: concurrent confirmation test accepts one mutation reservation.
 
 **Dependencies:** Task 19
 
@@ -593,13 +593,18 @@ guards.
 
 **Acceptance criteria:**
 
-- [ ] Raw inputs, generated PDFs, and large sanitized histories use separate prefixes and access policies.
+- [ ] Raw inputs, generated PDFs, and large sanitized histories use separate prefixes. Per-class IAM access policies are deferred to Task 39A under an approved exception.
 - [ ] OAuth/SMTP/model secrets are retrieved only through secret references and never logged.
 - [ ] Presigned links obey configured expiry and sanitized history excludes credential material.
+- [ ] Object publication coordinator proves S3 acceptance before publishing DynamoDB object/history pointers, disambiguates ambiguous S3 outcomes, and fails closed when the object cannot be confirmed.
+- [ ] Pagination tokens are authenticated (HMAC-SHA256) and bound to the exact table, repository/query family, scan direction, workflow partition, and sort-key family.
 
 **Verification:**
 
-- [ ] Tests pass against the storage sandbox: `cargo test -p storage s3 secrets history --features integration`
+- [ ] Unit tests pass: `cargo test -p storage --lib`
+- [ ] Live S3/SSM integration tests pass against LocalStack: `LOCALSTACK_ENDPOINT=http://127.0.0.1:4566 cargo test -p storage --test object_integration --features integration -- --nocapture`
+- [ ] Live DynamoDB Local integration tests pass: `cargo test -p storage --test dynamodb_integration --features integration -- --nocapture`
+- [ ] Publication coordinator tests pass: `cargo test -p application publication --lib`
 
 **Dependencies:** Task 19
 

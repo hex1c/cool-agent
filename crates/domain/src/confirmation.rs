@@ -424,10 +424,44 @@ pub struct ConfirmationConsumePrecondition {
 /// Consumed record and workflow transition that must be persisted together.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmationConsumption {
-    pub transition: TransitionOutcome,
-    pub confirmation: ConfirmationRecord,
-    pub authorization: AuthorizedActionAudit,
-    pub precondition: ConfirmationConsumePrecondition,
+    transition: TransitionOutcome,
+    confirmation: ConfirmationRecord,
+    authorization: AuthorizedActionAudit,
+    precondition: ConfirmationConsumePrecondition,
+}
+
+impl ConfirmationConsumption {
+    pub const fn transition(&self) -> &TransitionOutcome {
+        &self.transition
+    }
+
+    pub const fn confirmation(&self) -> &ConfirmationRecord {
+        &self.confirmation
+    }
+
+    pub const fn authorization(&self) -> &AuthorizedActionAudit {
+        &self.authorization
+    }
+
+    pub const fn precondition(&self) -> &ConfirmationConsumePrecondition {
+        &self.precondition
+    }
+
+    pub fn into_parts(
+        self,
+    ) -> (
+        TransitionOutcome,
+        ConfirmationRecord,
+        AuthorizedActionAudit,
+        ConfirmationConsumePrecondition,
+    ) {
+        (
+            self.transition,
+            self.confirmation,
+            self.authorization,
+            self.precondition,
+        )
+    }
 }
 
 /// Typed fail-closed rejection reasons for confirmation consumption.

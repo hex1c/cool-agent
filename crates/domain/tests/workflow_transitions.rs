@@ -101,19 +101,17 @@ fn consume_confirmation(
     at: u64,
 ) -> Result<Workflow, Box<dyn std::error::Error>> {
     let authorized = participant_authorization(at)?;
-    Ok(confirmation
-        .consume(
-            workflow,
-            &authorized.for_workflow(workflow),
-            ConfirmationConsumeRequest {
-                preview_digest: PreviewDigest::new([1; 32]),
-                mutation_target: MutationTargetFingerprint::new([2; 32]),
-                source: TopicMessageReference::new(topic()?, MessageId::new(i64::try_from(at)?)?),
-                confirmed_at: time(at),
-            },
-        )?
-        .transition
-        .workflow)
+    let consumption = confirmation.consume(
+        workflow,
+        &authorized.for_workflow(workflow),
+        ConfirmationConsumeRequest {
+            preview_digest: PreviewDigest::new([1; 32]),
+            mutation_target: MutationTargetFingerprint::new([2; 32]),
+            source: TopicMessageReference::new(topic()?, MessageId::new(i64::try_from(at)?)?),
+            confirmed_at: time(at),
+        },
+    )?;
+    Ok(consumption.transition().workflow.clone())
 }
 
 fn correct_confirmation(

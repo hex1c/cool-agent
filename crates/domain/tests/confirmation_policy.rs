@@ -269,33 +269,36 @@ fn approved_non_owner_consumes_confirmation_and_keeps_the_owner_principal()
 
     let consumed = confirmation.consume(&workflow, &authorization, consume_request(8)?)?;
     assert_eq!(
-        consumed.transition.workflow.state(),
+        consumed.transition().workflow.state(),
         &WorkflowState::SheetOrDocWriteStarted
     );
-    assert_eq!(consumed.transition.audit.actor, participant(202)?);
-    assert_eq!(consumed.transition.audit.owner, participant(101)?);
-    assert_eq!(consumed.authorization.actor, participant(202)?);
-    assert_eq!(consumed.authorization.topic, topic()?);
-    assert_eq!(consumed.authorization.source_message, MessageId::new(8)?);
+    assert_eq!(consumed.transition().audit.actor, participant(202)?);
+    assert_eq!(consumed.transition().audit.owner, participant(101)?);
+    assert_eq!(consumed.authorization().actor, participant(202)?);
+    assert_eq!(consumed.authorization().topic, topic()?);
+    assert_eq!(consumed.authorization().source_message, MessageId::new(8)?);
     assert_eq!(
-        consumed.authorization.membership_source,
+        consumed.authorization().membership_source,
         MembershipAuthorizationSource::Live
     );
-    assert_eq!(consumed.confirmation.status(), ConfirmationStatus::Consumed);
     assert_eq!(
-        consumed.confirmation.confirming_actor(),
+        consumed.confirmation().status(),
+        ConfirmationStatus::Consumed
+    );
+    assert_eq!(
+        consumed.confirmation().confirming_actor(),
         Some(participant(202)?)
     );
     assert_eq!(
-        consumed.precondition.expected_workflow_revision,
+        consumed.precondition().expected_workflow_revision,
         workflow.revision()
     );
     assert_eq!(
-        consumed.precondition.expected_confirmation_status,
+        consumed.precondition().expected_confirmation_status,
         ConfirmationStatus::Pending
     );
     assert_eq!(
-        consumed.precondition.confirmation_id,
+        consumed.precondition().confirmation_id,
         ConfirmationId::new("confirmation-1")?
     );
     Ok(())
@@ -323,7 +326,7 @@ fn outage_cache_can_authorize_confirmation_and_is_recorded()
         consume_request(8)?,
     )?;
     assert_eq!(
-        consumed.confirmation.membership_authorization(),
+        consumed.confirmation().membership_authorization(),
         Some(MembershipAuthorizationSource::OutageCache {
             live_observed_at: time(7),
             outage: MembershipLookupOutageKind::ConnectionFailure,
@@ -450,7 +453,7 @@ fn confirmation_rejects_changed_bindings_expiry_and_replay()
     let consumed = confirmation.consume(&workflow, &authorization, consume_request(8)?)?;
     assert!(matches!(
         consumed
-            .confirmation
+            .confirmation()
             .consume(&workflow, &authorization, consume_request(8)?),
         Err(ConfirmationError::AlreadyConsumed)
     ));
@@ -594,7 +597,7 @@ fn stopped_corrected_and_mismatched_workflows_invalidate_confirmation()
     let completed = advance(
         &advance(
             &advance(
-                &consumed.transition.workflow,
+                &consumed.transition().workflow,
                 WorkflowTransition::CompleteSheetOrDocWrite,
                 9,
             )?,
@@ -618,9 +621,9 @@ fn consumed_confirmation_serialization_round_trips() -> Result<(), Box<dyn std::
     let authorization = authorized_action(&workflow, 202, -1001, 8)?;
     let consumed = confirmation.consume(&workflow, &authorization, consume_request(8)?)?;
 
-    let json = serde_json::to_string(&consumed.confirmation)?;
+    let json = serde_json::to_string(consumed.confirmation())?;
     let restored: ConfirmationRecord = serde_json::from_str(&json)?;
-    assert_eq!(restored, consumed.confirmation);
+    assert_eq!(&restored, consumed.confirmation());
     Ok(())
 }
 
@@ -643,7 +646,7 @@ fn confirmed_action_is_derived_from_the_pending_record() -> Result<(), Box<dyn s
         let (workflow, confirmation) = issued_confirmation(action)?;
         let authorization = authorized_action(&workflow, 202, -1001, 8)?;
         let consumed = confirmation.consume(&workflow, &authorization, consume_request(8)?)?;
-        assert_eq!(consumed.transition.workflow.state(), &expected_state);
+        assert_eq!(consumed.transition().workflow.state(), &expected_state);
     }
     Ok(())
 }

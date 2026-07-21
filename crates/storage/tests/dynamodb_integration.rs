@@ -4,8 +4,10 @@ use application::external_operation::{
     BeginAttemptOutcome, CompletedAttempt, ExecutionOutcome, ExternalResourceId, JournalState,
     OperationJournal, ProviderOutcome,
 };
+use application::ports::{ObjectClass, StorageKey, StorageRecordId, StoredObject};
 use application::repositories::{
-    ConditionalWriteOutcome, ConfirmationRepository, ConsumeAndPrepareRequest, WorkflowCreation,
+    ConditionalWriteOutcome, ConfirmationRepository, ConsumeAndPrepareRequest, HistoryCheckpoint,
+    HistoryRepository, HistorySequence, ObjectMetadataRepository, PageRequest, WorkflowCreation,
     WorkflowRepository,
 };
 use aws_sdk_dynamodb::config::{Credentials, Region};
@@ -25,7 +27,7 @@ use domain::{
     TransitionRequest, WaitDeadline, Workflow, WorkflowTimestamp, WorkflowTransition,
 };
 use storage::audit::StoredAudit;
-use storage::dynamodb::DynamoDbStore;
+use storage::dynamodb::{DynamoDbStore, StorageError};
 
 fn time(seconds: u64) -> WorkflowTimestamp {
     WorkflowTimestamp::from_unix_seconds(seconds)
@@ -128,10 +130,20 @@ async fn create_table(
 #[tokio::test]
 async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
 -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var_os("DYNAMODB_ENDPOINT").is_none()
+        && std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:8000".parse()?,
+            std::time::Duration::from_millis(250),
+        )
+        .is_err()
+    {
+        eprintln!("skipping DynamoDB Local integration test: port 8000 is unavailable");
+        return Ok(());
+    }
     let client = local_client();
     let table_name = format!("novus-test-{}", uuid::Uuid::new_v4().simple());
     create_table(&client, &table_name).await?;
-    let store = DynamoDbStore::new(client.clone(), table_name.clone())?;
+    let store = DynamoDbStore::new(client.clone(), table_name.clone(), "dev", [7; 32])?;
 
     let initial = Workflow::new(
         WorkflowId::new("workflow-race")?,
@@ -273,8 +285,8 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
         },
     )?;
     let operation_key = IdempotencyKey::new(
-        consumed.transition.workflow.id().clone(),
-        consumed.transition.workflow.revision(),
+        consumed.transition().workflow.id().clone(),
+        consumed.transition().workflow.revision(),
         OperationKind::GoogleWrite,
         OperationTargetFingerprint::new([2; 32]),
     );
@@ -304,7 +316,7 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
     ));
     let consumed_confirmation = ConfirmationRepository::load(
         &store,
-        request.consumption.transition.workflow.id(),
+        request.consumption().transition().workflow.id(),
         &confirmation_id,
     )
     .await?;
@@ -314,8 +326,8 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
     ));
 
     let (audit_pk, audit_sk) = storage::keys::audit(
-        request.consumption.transition.workflow.id(),
-        request.consumption.transition.workflow.revision(),
+        request.consumption().transition().workflow.id(),
+        request.consumption().transition().workflow.revision(),
     )?;
     let audit_item = client
         .get_item()
@@ -340,7 +352,7 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
         } if transition.owner == participant(101)?
             && transition.actor == participant(202)?
             && transition.source_message == MessageId::new(8)?
-            && transition.new_revision == request.consumption.transition.workflow.revision()
+            && transition.new_revision == request.consumption().transition().workflow.revision()
             && authorization.actor == participant(202)?
     ));
 
@@ -368,6 +380,148 @@ async fn dynamodb_conditional_workflow_confirmation_and_journal_races()
             resource_id: Some(ref resource_id),
         }) if value == attempt && resource_id.as_str() == "resource-1"
     ));
+
+    client.delete_table().table_name(table_name).send().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn dynamodb_history_and_object_metadata_are_immutable_and_page_in_order()
+-> Result<(), Box<dyn std::error::Error>> {
+    if std::env::var_os("DYNAMODB_ENDPOINT").is_none()
+        && std::net::TcpStream::connect_timeout(
+            &"127.0.0.1:8000".parse()?,
+            std::time::Duration::from_millis(250),
+        )
+        .is_err()
+    {
+        eprintln!("skipping DynamoDB Local integration test: port 8000 is unavailable");
+        return Ok(());
+    }
+
+    let client = local_client();
+    let table_name = format!("novus-test-{}", uuid::Uuid::new_v4().simple());
+    create_table(&client, &table_name).await?;
+    let store = DynamoDbStore::new(client.clone(), table_name.clone(), "dev", [7; 32])?;
+    let workflow_id = WorkflowId::new("workflow-storage-page")?;
+
+    let raw_object = StoredObject {
+        workflow_id: workflow_id.clone(),
+        object_id: StorageRecordId::new("attachment-9")?,
+        class: ObjectClass::RawInput,
+        storage_key: StorageKey::new("raw/workflow-storage-page/attachment-9.bin")?,
+        byte_length: 4,
+        sha256: [9; 32],
+        media_type: "application/octet-stream".to_owned(),
+        created_at: time(9),
+    };
+    assert_eq!(
+        store.record(&raw_object).await?,
+        ConditionalWriteOutcome::Committed
+    );
+    // Same-content re-insert is idempotent success, not conflict.
+    assert_eq!(
+        store.record(&raw_object).await?,
+        ConditionalWriteOutcome::Committed
+    );
+    // Different content at the same key is a corruption/collision.
+    let conflicting_object = StoredObject {
+        workflow_id: workflow_id.clone(),
+        object_id: StorageRecordId::new("attachment-9")?,
+        class: ObjectClass::RawInput,
+        storage_key: StorageKey::new("raw/workflow-storage-page/attachment-9.bin")?,
+        byte_length: 99,
+        sha256: [1; 32],
+        media_type: "application/octet-stream".to_owned(),
+        created_at: time(9),
+    };
+    assert!(matches!(
+        store.record(&conflicting_object).await,
+        Err(StorageError::ConflictDifferent { .. })
+    ));
+    let objects =
+        ObjectMetadataRepository::page(&store, &workflow_id, &PageRequest::new(10, None)?).await?;
+    assert_eq!(objects.items, vec![raw_object]);
+    assert!(objects.next_token.is_none());
+
+    for sequence in [10_u64, 2] {
+        let object = StoredObject {
+            workflow_id: workflow_id.clone(),
+            object_id: StorageRecordId::new(format!("history-{sequence}"))?,
+            class: ObjectClass::SanitizedHistory,
+            storage_key: StorageKey::new(format!("history/{workflow_id}/{sequence:020}.json"))?,
+            byte_length: sequence,
+            sha256: [u8::try_from(sequence)?; 32],
+            media_type: "application/json".to_owned(),
+            created_at: time(sequence),
+        };
+        let checkpoint = HistoryCheckpoint {
+            workflow_id: workflow_id.clone(),
+            sequence: HistorySequence::new(sequence),
+            object,
+            model_version: "model-v1".to_owned(),
+            prompt_version: "prompt-v1".to_owned(),
+            created_at: time(sequence),
+        };
+        assert_eq!(
+            store.append(&checkpoint).await?,
+            ConditionalWriteOutcome::Committed
+        );
+        // Same-content re-append is idempotent success, not conflict.
+        assert_eq!(
+            store.append(&checkpoint).await?,
+            ConditionalWriteOutcome::Committed
+        );
+        // Different checkpoint at the same sequence is a corruption/collision.
+        let conflicting_checkpoint = HistoryCheckpoint {
+            workflow_id: workflow_id.clone(),
+            sequence: HistorySequence::new(sequence),
+            object: StoredObject {
+                workflow_id: workflow_id.clone(),
+                object_id: StorageRecordId::new(format!("history-{sequence}-diff"))?,
+                class: ObjectClass::SanitizedHistory,
+                storage_key: StorageKey::new(format!(
+                    "history/{workflow_id}/{sequence:020}-diff.json"
+                ))?,
+                byte_length: 77,
+                sha256: [3; 32],
+                media_type: "application/json".to_owned(),
+                created_at: time(sequence),
+            },
+            model_version: "model-v1".to_owned(),
+            prompt_version: "prompt-v1".to_owned(),
+            created_at: time(sequence),
+        };
+        assert!(matches!(
+            store.append(&conflicting_checkpoint).await,
+            Err(StorageError::ConflictDifferent { .. })
+        ));
+    }
+
+    let first_page =
+        HistoryRepository::page(&store, &workflow_id, &PageRequest::new(1, None)?).await?;
+    assert_eq!(
+        first_page.items.first().map(|item| item.sequence),
+        Some(HistorySequence::new(2))
+    );
+    let second_page = HistoryRepository::page(
+        &store,
+        &workflow_id,
+        &PageRequest::new(1, first_page.next_token)?,
+    )
+    .await?;
+    assert_eq!(
+        second_page.items.first().map(|item| item.sequence),
+        Some(HistorySequence::new(10))
+    );
+    let third_page = HistoryRepository::page(
+        &store,
+        &workflow_id,
+        &PageRequest::new(1, second_page.next_token)?,
+    )
+    .await?;
+    assert!(third_page.items.is_empty());
+    assert!(third_page.next_token.is_none());
 
     client.delete_table().table_name(table_name).send().await?;
     Ok(())

@@ -339,18 +339,24 @@ impl ConfirmationRepository for DynamoDbStore {
         &self,
         request: &ConsumeAndPrepareRequest,
     ) -> Result<ConditionalWriteOutcome, StorageError> {
+        request.validate().map_err(|_| {
+            StorageError::Validation(
+                crate::dynamodb::StoreValidationError::InvalidConfirmationOperationBinding,
+            )
+        })?;
+        let consumption = request.consumption();
+        let transition = consumption.transition();
         validate_transition(
-            &request.consumption.transition,
-            request.consumption.precondition.expected_workflow_revision,
+            transition,
+            consumption.precondition().expected_workflow_revision,
         )?;
-        let transition = &request.consumption.transition;
         let workflow = &transition.workflow;
         let audit = &transition.audit;
-        let confirmation = &request.consumption.confirmation;
+        let confirmation = consumption.confirmation();
 
         let (wf_pk, wf_sk) = crate::keys::workflow_metadata(workflow.id()).map_err(key_error)?;
 
-        let confirmation_id = request.consumption.precondition.confirmation_id.clone();
+        let confirmation_id = consumption.precondition().confirmation_id.clone();
         let (conf_pk, conf_sk) =
             crate::keys::confirmation(workflow.id(), &confirmation_id).map_err(key_error)?;
 
@@ -358,13 +364,9 @@ impl ConfirmationRepository for DynamoDbStore {
             crate::keys::audit(workflow.id(), audit.new_revision).map_err(key_error)?;
 
         let (op_pk, op_sk) =
-            crate::keys::operation_journal(&request.operation_key).map_err(key_error)?;
+            crate::keys::operation_journal(request.operation_key()).map_err(key_error)?;
 
-        let expected_revision = request
-            .consumption
-            .precondition
-            .expected_workflow_revision
-            .get();
+        let expected_revision = consumption.precondition().expected_workflow_revision.get();
         let new_revision = workflow.revision().get();
         let new_payload = serialize_payload("workflow", workflow)?;
 
@@ -372,11 +374,11 @@ impl ConfirmationRepository for DynamoDbStore {
 
         let audit_envelope = StoredAudit::AuthorizedTransition {
             transition: audit.clone(),
-            authorization: request.consumption.authorization.clone(),
+            authorization: consumption.authorization().clone(),
         };
         let audit_payload = serialize_payload("audit", &audit_envelope)?;
 
-        let op_journal = StoredOperationJournal::prepared(request.operation_key.clone());
+        let op_journal = StoredOperationJournal::prepared(request.operation_key().clone());
         let op_journal_payload = serialize_payload("operation journal", &op_journal)?;
 
         let outcome = self
