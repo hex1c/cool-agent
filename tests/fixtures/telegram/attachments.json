@@ -1,0 +1,36 @@
+{
+  "update_id": 1010,
+  "message": {
+    "message_id": 30,
+    "from": {
+      "id": 111111111,
+      "is_bot": false,
+      "first_name": "Owner-A"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "type": "supergroup",
+      "title": "Novus Dev Forum"
+    },
+    "date": 1717000400,
+    "message_thread_id": 10,
+    "is_topic_message": true,
+    "caption": "attachments for the quotation request",
+    "photo": [
+      {
+        "file_id": "AgACAgIAAxkBAAP",
+        "file_unique_id": "AQADunHz",
+        "width": 800,
+        "height": 600,
+        "file_size": 123456
+      }
+    ],
+    "document": {
+      "file_id": "BQACAgIAAxkBAAIB",
+      "file_unique_id": "AQADvLpA",
+      "file_name": "price_list.pdf",
+      "mime_type": "application/pdf",
+      "file_size": 204800
+    }
+  }
+}

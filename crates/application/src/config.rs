@@ -13,6 +13,7 @@ pub struct DeploymentConfig {
     pub email: EmailConfig,
     pub ai: AiConfig,
     pub attachments: AttachmentConfig,
+    pub normalization: NormalizationConfig,
     pub timeouts: TimeoutConfig,
     pub retry: RetryConfig,
     pub links: LinkConfig,
@@ -106,6 +107,41 @@ pub struct AttachmentConfig {
     pub max_count: u8,
     pub max_bytes: u64,
     pub allowed_mime_types: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct NormalizationConfig {
+    pub max_image_pixels: u64,
+    pub max_pdf_pages: u32,
+    pub max_decompressed_bytes: u64,
+    pub max_normalized_text_bytes: u64,
+    #[serde(rename = "maxCsvRows")]
+    pub max_csv_rows: u32,
+    #[serde(rename = "maxCsvCells")]
+    pub max_csv_cells: u64,
+    #[serde(rename = "maxOfficeUncompressedBytes")]
+    pub max_office_uncompressed_bytes: u64,
+    #[serde(rename = "maxCompressionRatio")]
+    pub max_compression_ratio: u64,
+}
+
+impl Default for NormalizationConfig {
+    /// Conservative non-zero defaults used by unit tests. Production config
+    /// is always loaded and semantically validated by the config loader.
+    fn default() -> Self {
+        Self {
+            max_image_pixels: 16_777_216,
+            max_pdf_pages: 50,
+            max_decompressed_bytes: 52_428_800,
+            max_normalized_text_bytes: 65_536,
+            max_csv_rows: 10_000,
+            max_csv_cells: 100_000,
+            max_office_uncompressed_bytes: 52_428_800,
+            max_compression_ratio: 100,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]

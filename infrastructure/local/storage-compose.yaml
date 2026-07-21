@@ -19,3 +19,12 @@ services:
       interval: 2s
       timeout: 2s
       retries: 30
+
+  stepfunctions-local:
+    image: amazon/stepfunctions-local:latest
+    depends_on:
+      - dynamodb-local
+    ports:
+      - "8083:8083"
+    environment:
+      LAMBDA_EXECUTOR: ""
