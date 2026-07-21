@@ -2,8 +2,20 @@ name: SAM build
 
 on:
   pull_request:
+    paths:
+      - 'functions/**'
+      - 'infrastructure/**'
+      - 'tests/fixtures/sam/**'
+      - 'Cargo.lock'
+      - '.github/workflows/sam.yml'
   push:
     branches: [dev, staging, prod]
+    paths:
+      - 'functions/**'
+      - 'infrastructure/**'
+      - 'tests/fixtures/sam/**'
+      - 'Cargo.lock'
+      - '.github/workflows/sam.yml'
 
 permissions:
   contents: read
@@ -22,7 +34,9 @@ jobs:
       - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
         with:
           version: "0.13.0"
-      - run: cargo install cargo-lambda --locked --version 1.9.1
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cargo-lambda@1.9.1
       - run: sam validate --lint --template-file infrastructure/spikes/rust-lambda.yaml
       - run: sam build --template-file infrastructure/spikes/rust-lambda.yaml
       - name: Prove invalid SAM fixture fails validation
