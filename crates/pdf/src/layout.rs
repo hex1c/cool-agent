@@ -103,6 +103,8 @@ struct TableDefJson {
     body_bottom: f32,
     text_inset: f32,
     minimum_row_line_height: f32,
+    #[serde(default)]
+    single_line_baselines: Vec<f32>,
     columns: Vec<ColumnDefJson>,
 }
 
@@ -125,6 +127,7 @@ pub struct QuotationLayout {
     pub table_body_bottom: f32,
     pub table_text_inset: f32,
     pub minimum_row_line_height: f32,
+    pub single_line_baselines: Vec<f32>,
 }
 
 impl QuotationLayout {
@@ -220,6 +223,7 @@ impl QuotationLayout {
             table_body_bottom: coords.table.body_bottom,
             table_text_inset: coords.table.text_inset,
             minimum_row_line_height: coords.table.minimum_row_line_height,
+            single_line_baselines: coords.table.single_line_baselines,
         })
     }
 

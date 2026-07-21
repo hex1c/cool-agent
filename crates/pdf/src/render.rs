@@ -2,7 +2,7 @@
 
 use printpdf::color::{Color, Rgb};
 use printpdf::font::BuiltinFont;
-use printpdf::graphics::{Line, LinePoint, Point, Rect};
+use printpdf::graphics::{Line, LinePoint, PaintMode, Point, Rect};
 use printpdf::ops::{Op, PdfFontHandle};
 use printpdf::serialize::PdfSaveOptions;
 use printpdf::text::TextItem;
@@ -19,9 +19,10 @@ use crate::layout::{
 };
 
 // Approximate average character width for Helvetica at a given size (in pt).
-// Helvetica's average glyph advance is ~0.5em.
+// Digits and common punctuation in Helvetica average ~0.55 em wide.
+// Using 0.55 keeps financial columns aligned while staying within tolerance for general text.
 fn text_width_pt(s: &str, size: f32) -> f32 {
-    s.chars().count() as f32 * size * 0.5
+    s.chars().count() as f32 * size * 0.55
 }
 
 // ---------------------------------------------------------------------------
@@ -448,6 +449,7 @@ impl QuotationRenderer {
 
         let mut cursor_y = layout.table_header_bottom + 2.0;
         let body_bottom = layout.table_body_bottom;
+        let mut baseline_idx: usize = 0;
 
         for block in &page.blocks {
             match block {
@@ -469,6 +471,7 @@ impl QuotationRenderer {
                     if *with_table_header {
                         // Reset cursor below the table header.
                         cursor_y = layout.table_header_bottom + 2.0;
+                        baseline_idx = 0;
                         self.push_table_header(&mut ops, &primary)?;
                     }
                 }
@@ -488,6 +491,7 @@ impl QuotationRenderer {
                         *is_continuation,
                         &mut cursor_y,
                         body_bottom,
+                        &mut baseline_idx,
                         &primary,
                     )?;
                 }
@@ -537,12 +541,10 @@ impl QuotationRenderer {
                 y: pt(PAGE_HEIGHT_PT - (strip.y + strip.height)),
                 width: pt(strip.width),
                 height: pt(strip.height),
-                mode: None,
+                mode: Some(PaintMode::Fill),
                 winding_order: None,
             },
         });
-        ops.push(Op::SaveGraphicsState);
-        ops.push(Op::RestoreGraphicsState);
 
         let title = "QUOTATION";
         let title_w = text_width_pt(title, FONT_SIZE_TITLE);
@@ -597,55 +599,36 @@ impl QuotationRenderer {
     ) -> Result<(), RenderError> {
         let layout = &self.layout;
         let region = layout.region("company_identity")?;
-        let mut y = region.y + 12.0;
-        self.text(
-            ops,
-            &doc.company.legal_name,
-            region.x,
-            y,
-            FONT_SIZE_TOTALS_BOLD,
+
+        // Collect all visible text lines to distribute them evenly within the region.
+        let mut text_lines: Vec<(&str, BuiltinFont, f32)> = Vec::new();
+        text_lines.push((
+            doc.company.legal_name.as_str(),
             BuiltinFont::HelveticaBold,
-            primary,
-        );
-        y += 11.0;
+            FONT_SIZE_TOTALS_BOLD,
+        ));
         if let Some(tax_id) = &doc.company.tax_id
             && !tax_id.is_empty()
         {
-            self.text(
-                ops,
-                tax_id,
-                region.x,
-                y,
-                FONT_SIZE_BODY,
-                BuiltinFont::Helvetica,
-                primary,
-            );
-            y += 10.0;
+            text_lines.push((tax_id.as_str(), BuiltinFont::Helvetica, FONT_SIZE_BODY));
         }
         for line in &doc.company.address {
-            self.text(
-                ops,
-                line,
-                region.x,
-                y,
-                FONT_SIZE_BODY,
-                BuiltinFont::Helvetica,
-                primary,
-            );
-            y += 10.0;
+            text_lines.push((line.as_str(), BuiltinFont::Helvetica, FONT_SIZE_BODY));
         }
         for line in &doc.company.contact {
-            self.text(
-                ops,
-                line,
-                region.x,
-                y,
-                FONT_SIZE_BODY,
-                BuiltinFont::Helvetica,
-                primary,
-            );
-            y += 10.0;
+            text_lines.push((line.as_str(), BuiltinFont::Helvetica, FONT_SIZE_BODY));
         }
+
+        let num_lines = text_lines.len();
+        if num_lines > 0 {
+            let line_height = region.height / num_lines as f32;
+            for (i, (text, font, size)) in text_lines.iter().enumerate() {
+                // Centre each line within its vertical slot.
+                let y = region.y + (i as f32 + 0.5) * line_height;
+                self.text(ops, text, region.x, y, *size, *font, primary);
+            }
+        }
+
         if let Some(logo) = &doc.company.logo_ref
             && !logo.is_empty()
         {
@@ -885,16 +868,36 @@ impl QuotationRenderer {
         is_continuation: bool,
         cursor_y: &mut f32,
         _body_bottom: f32,
+        baseline_idx: &mut usize,
         primary: &Color,
     ) -> Result<(), RenderError> {
         let layout = &self.layout;
         let row_h = layout.minimum_row_line_height;
 
+        // Snap single-line rows to the layout's prescribed baselines. Multi-line
+        // rows continue from the current cursor position.
+        let target_baseline = if lines.len() == 1 {
+            layout
+                .single_line_baselines
+                .get(*baseline_idx)
+                .copied()
+                .unwrap_or(*cursor_y + 4.0)
+        } else {
+            *cursor_y + 4.0
+        };
+        *cursor_y = target_baseline - 4.0;
+
         // Sequence (left) — repeated on continuation fragments for context (rule 4).
+        // Continuation fragments get a small marker.
+        let seq_label = if is_continuation {
+            format!("{} (cont.)", item.sequence)
+        } else {
+            item.sequence.to_string()
+        };
         if let Some(col) = layout.column_by_name("sequence") {
             self.text(
                 ops,
-                &item.sequence.to_string(),
+                &seq_label,
                 col.left + 2.0,
                 *cursor_y + 4.0,
                 FONT_SIZE_BODY,
@@ -1014,16 +1017,19 @@ impl QuotationRenderer {
             }
         }
         *cursor_y += row_h * (lines.len().max(1) as f32);
+        *baseline_idx += lines.len().max(1);
         Ok(())
     }
 
     /// Compute the x position for text in a column based on alignment.
-    /// Right-aligned text is placed so its right edge sits 2pt inside the column.
+    /// Right-aligned text is placed so its right edge sits inside the column by
+    /// the configured table text inset.
     fn align_x(&self, col: &crate::layout::TableColumn, text: &str, size: f32) -> f32 {
+        let inset = self.layout.table_text_inset;
         match col.alignment.as_str() {
-            "right" => col.right - text_width_pt(text, size) - 2.0,
+            "right" => col.right - text_width_pt(text, size) - inset,
             "center" => col.left + (col.width() - text_width_pt(text, size)) / 2.0,
-            _ => col.left + 2.0,
+            _ => col.left + inset,
         }
     }
 
