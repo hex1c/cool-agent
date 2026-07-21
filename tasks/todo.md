@@ -431,14 +431,14 @@ and expiry as pure domain transitions.
 
 **Acceptance criteria:**
 
-- [ ] Every PRD progress stage and terminal outcome maps to a typed state.
-- [ ] Illegal, terminal, expired, and race-lost transitions return typed errors.
-- [ ] Every transition records owner, actor, source message, revision, and time.
+- [x] Every PRD progress stage and terminal outcome maps to a typed state.
+- [x] Illegal, terminal, expired, and race-lost transitions return typed errors.
+- [x] Every transition records owner, actor, source message, revision, and time.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p domain workflow_state`
-- [ ] Coverage check: workflow state transitions have 100% branch coverage.
+- [x] Tests pass: `cargo test -p domain workflow_state`
+- [x] Coverage check: workflow state transitions have 100% branch coverage.
 
 **Dependencies:** Task 14
 
