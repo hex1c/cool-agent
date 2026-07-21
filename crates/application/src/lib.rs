@@ -5,6 +5,7 @@
 pub mod attachments;
 pub mod config;
 pub mod config_loader;
+pub mod existing_files;
 pub mod external_operation;
 pub mod normalization;
 pub mod ports;
