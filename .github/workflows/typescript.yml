@@ -2,8 +2,18 @@ name: TypeScript agent harness
 
 on:
   pull_request:
+    paths:
+      - 'services/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/typescript.yml'
   push:
     branches: [dev, staging, prod]
+    paths:
+      - 'services/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/typescript.yml'
 
 permissions:
   contents: read

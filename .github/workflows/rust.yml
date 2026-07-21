@@ -2,8 +2,22 @@ name: Rust
 
 on:
   pull_request:
+    paths:
+      - 'crates/**'
+      - 'functions/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/rust.yml'
   push:
     branches: [dev, staging, prod]
+    paths:
+      - 'crates/**'
+      - 'functions/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/rust.yml'
 
 permissions:
   contents: read
