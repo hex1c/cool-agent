@@ -1,0 +1,103 @@
+{
+  "$comment": "Catalogue of the inline CSV/Office normalization fixtures built in crates/application/tests/office_security.rs. No binary blobs are committed; every fixture is constructed byte-for-byte in the test source for auditability.",
+  "task": 28,
+  "testFile": "crates/application/tests/office_security.rs",
+  "cases": [
+    {
+      "name": "csv_comma_dialect",
+      "kind": "csv",
+      "input": "comma-separated UTF-8 with header row",
+      "expect": "extracted_text present, bounded by maxNormalizedTextBytes"
+    },
+    {
+      "name": "csv_semicolon_dialect",
+      "kind": "csv",
+      "input": "semicolon-delimited UTF-8",
+      "expect": "delimiter auto-detected, extracted_text present"
+    },
+    {
+      "name": "csv_with_bom",
+      "kind": "csv",
+      "input": "UTF-8 BOM prefix then comma dialect",
+      "expect": "BOM stripped, extracted_text present"
+    },
+    {
+      "name": "csv_excessive_rows",
+      "kind": "csv",
+      "input": "rows exceeding maxCsvRows",
+      "expect": "ExcessiveRows error"
+    },
+    {
+      "name": "csv_excessive_cells",
+      "kind": "csv",
+      "input": "total cells exceeding maxCsvCells",
+      "expect": "ExcessiveCells error"
+    },
+    {
+      "name": "csv_invalid_utf8",
+      "kind": "csv",
+      "input": "invalid UTF-8 byte sequence",
+      "expect": "MalformedCsv error"
+    },
+    {
+      "name": "docx_valid_zip",
+      "kind": "word",
+      "input": "minimal ZIP with [Content_Types].xml entry",
+      "expect": "NormalizedDocument kind=word, no extracted_text (deferred to Pi tool)"
+    },
+    {
+      "name": "xlsx_valid_zip",
+      "kind": "excel",
+      "input": "minimal ZIP with [Content_Types].xml entry",
+      "expect": "NormalizedDocument kind=excel, no extracted_text (deferred to Pi tool)"
+    },
+    {
+      "name": "zip_macro_vba",
+      "kind": "office",
+      "input": "ZIP containing vbaProject.bin entry",
+      "expect": "MacroDetected error"
+    },
+    {
+      "name": "zip_encrypted",
+      "kind": "office",
+      "input": "ZIP containing EncryptedPackage/EncryptionInfo entry",
+      "expect": "EncryptedOffice error"
+    },
+    {
+      "name": "zip_decompression_bomb",
+      "kind": "office",
+      "input": "ZIP entry with uncompressed size exceeding maxOfficeUncompressedBytes or compression ratio exceeding maxCompressionRatio",
+      "expect": "ExcessiveUncompressedSize or DecompressionBomb error"
+    },
+    {
+      "name": "zip_data_descriptor",
+      "kind": "office",
+      "input": "ZIP with data-descriptor flag set (sizes in local header are zero)",
+      "expect": "fail-closed rejection (MalformedOffice or suspect)"
+    },
+    {
+      "name": "legacy_doc_ole2",
+      "kind": "word",
+      "input": "OLE2 magic bytes D0 CF 11 E0 (.doc)",
+      "expect": "UnsupportedLegacyFormat error"
+    },
+    {
+      "name": "legacy_xls_ole2",
+      "kind": "excel",
+      "input": "OLE2 magic bytes D0 CF 11 E0 (.xls)",
+      "expect": "UnsupportedLegacyFormat error"
+    },
+    {
+      "name": "macro_enabled_mime",
+      "kind": "office",
+      "input": "macro-enabled MIME type (e.g. application/vnd.ms-excel.sheet.macroEnabled.12)",
+      "expect": "rejected (disallowed MIME / UnsupportedLegacyFormat)"
+    },
+    {
+      "name": "generic_zip_mime",
+      "kind": "office",
+      "input": "application/zip declared for OOXML bytes",
+      "expect": "MediaTypeMismatch error"
+    }
+  ]
+}

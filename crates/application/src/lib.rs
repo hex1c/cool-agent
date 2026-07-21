@@ -2,6 +2,14 @@
 
 //! Application services and infrastructure-independent configuration.
 
+pub mod attachments;
 pub mod config;
 pub mod config_loader;
+pub mod existing_files;
 pub mod external_operation;
+pub mod normalization;
+pub mod ports;
+pub mod publication;
+pub mod repositories;
+pub mod resumable_confirmation;
+pub mod sanitized_history;

@@ -50,6 +50,15 @@ attachments:
     - image/jpeg
     - image/png
     - application/pdf
+normalization:
+  maxImagePixels: 16777216
+  maxPdfPages: 50
+  maxDecompressedBytes: 52428800
+  maxNormalizedTextBytes: 65536
+  maxCsvRows: 10000
+  maxCsvCells: 100000
+  maxOfficeUncompressedBytes: 52428800
+  maxCompressionRatio: 100
 timeouts:
   collectionSeconds: 1800
   clarificationSeconds: 43200

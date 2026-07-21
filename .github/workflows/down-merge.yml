@@ -1,0 +1,49 @@
+name: Down-merge prod hotfix
+
+# When a PR is merged directly into `prod`, carry the change down to
+# `staging` and then `dev` so all protected branches stay in sync.
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - prod
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  down-merge:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Down-merge prod → staging
+        id: staging
+        run: |
+          set -e
+          git checkout staging
+          git merge --ff-only origin/prod && echo "merged=true" >> "$GITHUB_OUTPUT" || {
+            git merge --no-ff origin/prod -m "chore: down-merge prod hotfix into staging"
+            git push origin staging
+            echo "merged=true" >> "$GITHUB_OUTPUT"
+          }
+
+      - name: Down-merge staging → dev
+        if: steps.staging.outputs.merged == 'true'
+        run: |
+          set -e
+          git checkout dev
+          git merge --ff-only origin/staging && echo "dev already in sync" || {
+            git merge --no-ff origin/staging -m "chore: down-merge prod hotfix into dev"
+            git push origin dev
+          }

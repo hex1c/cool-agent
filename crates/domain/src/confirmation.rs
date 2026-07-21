@@ -107,6 +107,34 @@ impl PendingConfirmation {
     }
 }
 
+#[cfg(any(test, feature = "test-utils"))]
+impl PendingConfirmation {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        confirmation_id: ConfirmationId,
+        workflow_id: WorkflowId,
+        workflow_revision: WorkflowRevision,
+        owner: ParticipantId,
+        topic: TopicSessionId,
+        preview_digest: PreviewDigest,
+        mutation_target: MutationTargetFingerprint,
+        action: ConfirmationAction,
+        expires_at: WaitDeadline,
+    ) -> Self {
+        Self {
+            confirmation_id,
+            workflow_id,
+            workflow_revision,
+            owner,
+            topic,
+            preview_digest,
+            mutation_target,
+            action,
+            expires_at,
+        }
+    }
+}
+
 /// Topic-qualified Telegram message used to consume a confirmation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -182,6 +210,51 @@ impl ConfirmationRecord {
         match self {
             Self::Pending(_) => None,
             Self::Consumed(consumed) => Some(consumed.membership_authorization),
+        }
+    }
+
+    /// The action selected when the preview was created.
+    pub const fn action(&self) -> ConfirmationAction {
+        match self {
+            Self::Pending(pending) => pending.action,
+            Self::Consumed(consumed) => consumed.pending.action,
+        }
+    }
+
+    /// The fingerprint of the exact external resource and mutation payload.
+    pub const fn mutation_target(&self) -> MutationTargetFingerprint {
+        match self {
+            Self::Pending(pending) => pending.mutation_target,
+            Self::Consumed(consumed) => consumed.pending.mutation_target,
+        }
+    }
+
+    /// The workflow revision after consumption, or None if still pending.
+    pub const fn resulting_workflow_revision(&self) -> Option<WorkflowRevision> {
+        match self {
+            Self::Pending(_) => None,
+            Self::Consumed(consumed) => Some(consumed.resulting_workflow_revision),
+        }
+    }
+
+    pub const fn owner(&self) -> ParticipantId {
+        match self {
+            Self::Pending(p) => p.owner(),
+            Self::Consumed(c) => c.pending.owner(),
+        }
+    }
+
+    pub const fn preview_digest(&self) -> PreviewDigest {
+        match self {
+            Self::Pending(p) => p.preview_digest(),
+            Self::Consumed(c) => c.pending.preview_digest(),
+        }
+    }
+
+    pub const fn workflow_revision(&self) -> WorkflowRevision {
+        match self {
+            Self::Pending(p) => p.workflow_revision(),
+            Self::Consumed(c) => c.pending.workflow_revision(),
         }
     }
 
@@ -285,6 +358,11 @@ impl ConfirmationRecord {
             confirmation_id: pending.confirmation_id.clone(),
             expected_confirmation_status: ConfirmationStatus::Pending,
         };
+        let authorization_audit = authorized_workflow_action_audit(
+            authorization,
+            request.source.topic,
+            request.source.message_id,
+        );
         let confirmation = Self::Consumed(ConsumedConfirmation {
             pending: pending.clone(),
             confirming_actor: authorization.actor(),
@@ -297,6 +375,7 @@ impl ConfirmationRecord {
         Ok(ConfirmationConsumption {
             transition,
             confirmation,
+            authorization: authorization_audit,
             precondition,
         })
     }
@@ -394,9 +473,44 @@ pub struct ConfirmationConsumePrecondition {
 /// Consumed record and workflow transition that must be persisted together.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfirmationConsumption {
-    pub transition: TransitionOutcome,
-    pub confirmation: ConfirmationRecord,
-    pub precondition: ConfirmationConsumePrecondition,
+    transition: TransitionOutcome,
+    confirmation: ConfirmationRecord,
+    authorization: AuthorizedActionAudit,
+    precondition: ConfirmationConsumePrecondition,
+}
+
+impl ConfirmationConsumption {
+    pub const fn transition(&self) -> &TransitionOutcome {
+        &self.transition
+    }
+
+    pub const fn confirmation(&self) -> &ConfirmationRecord {
+        &self.confirmation
+    }
+
+    pub const fn authorization(&self) -> &AuthorizedActionAudit {
+        &self.authorization
+    }
+
+    pub const fn precondition(&self) -> &ConfirmationConsumePrecondition {
+        &self.precondition
+    }
+
+    pub fn into_parts(
+        self,
+    ) -> (
+        TransitionOutcome,
+        ConfirmationRecord,
+        AuthorizedActionAudit,
+        ConfirmationConsumePrecondition,
+    ) {
+        (
+            self.transition,
+            self.confirmation,
+            self.authorization,
+            self.precondition,
+        )
+    }
 }
 
 /// Typed fail-closed rejection reasons for confirmation consumption.
@@ -539,5 +653,27 @@ impl Workflow {
             confirmation,
             precondition,
         })
+    }
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl ConsumedConfirmation {
+    #[allow(clippy::too_many_arguments)]
+    pub const fn new(
+        pending: PendingConfirmation,
+        confirming_actor: ParticipantId,
+        membership_authorization: MembershipAuthorizationSource,
+        source: TopicMessageReference,
+        confirmed_at: WorkflowTimestamp,
+        resulting_workflow_revision: WorkflowRevision,
+    ) -> Self {
+        Self {
+            pending,
+            confirming_actor,
+            membership_authorization,
+            source,
+            confirmed_at,
+            resulting_workflow_revision,
+        }
     }
 }

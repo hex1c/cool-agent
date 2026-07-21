@@ -15,6 +15,7 @@
     "email": { "$ref": "#/$defs/email" },
     "ai": { "$ref": "#/$defs/ai" },
     "attachments": { "$ref": "#/$defs/attachments" },
+    "normalization": { "$ref": "#/$defs/normalization" },
     "timeouts": { "$ref": "#/$defs/timeouts" },
     "retry": { "$ref": "#/$defs/retry" },
     "links": { "$ref": "#/$defs/links" },
@@ -121,6 +122,22 @@
             "properties": {
               "attachments": {
                 "required": ["maxCount", "maxBytes", "allowedMimeTypes"]
+              }
+            }
+          },
+          {
+            "properties": {
+              "normalization": {
+                "required": [
+                  "maxImagePixels",
+                  "maxPdfPages",
+                  "maxDecompressedBytes",
+                  "maxNormalizedTextBytes",
+                  "maxCsvRows",
+                  "maxCsvCells",
+                  "maxOfficeUncompressedBytes",
+                  "maxCompressionRatio"
+                ]
               }
             }
           },
@@ -255,6 +272,20 @@
           "uniqueItems": true,
           "items": { "type": "string", "minLength": 1 }
         }
+      }
+    },
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxImagePixels": { "type": "integer", "minimum": 1 },
+        "maxPdfPages": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "maxDecompressedBytes": { "type": "integer", "minimum": 1 },
+        "maxNormalizedTextBytes": { "type": "integer", "minimum": 1 },
+        "maxCsvRows": { "type": "integer", "minimum": 1 },
+        "maxCsvCells": { "type": "integer", "minimum": 1 },
+        "maxOfficeUncompressedBytes": { "type": "integer", "minimum": 1 },
+        "maxCompressionRatio": { "type": "integer", "minimum": 1 }
       }
     },
     "timeouts": {

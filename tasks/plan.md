@@ -147,8 +147,8 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 - [x] Task 16: Implement live membership authorization and revision-bound confirmation
 - [x] Task 17: Implement idempotency and retry policy
 - [x] Task 18: Implement the budget decision policy
-- [ ] Task 19: Define persistence ports and DynamoDB keys
-- [ ] Task 20: Implement conditional workflow and idempotency storage
+- [x] Task 19: Define persistence ports and DynamoDB keys
+- [x] Task 20: Implement conditional workflow and idempotency storage
 - [ ] Task 21: Implement object, history, and secret storage
 
 ### Checkpoint: Safety Core Proven
@@ -159,10 +159,10 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 ### Phase 3: Telegram and OAuth Vertical Slice
 
-- [ ] Task 22: Implement Telegram webhook verification and normalization
-- [ ] Task 23: Implement topic commands, callbacks, and safe delivery
-- [ ] Task 24: Implement private Google OAuth onboarding
-- [ ] Task 25: Wire webhook and OAuth Lambda entry points
+- [x] Task 22: Implement Telegram webhook verification and normalization
+- [x] Task 23: Implement topic commands, callbacks, and safe delivery
+- [x] Task 24: Implement private Google OAuth onboarding
+- [x] Task 25: Wire webhook and OAuth Lambda entry points
 
 ### Checkpoint: Intake and Identity Work Locally
 
@@ -172,12 +172,12 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 ### Phase 4: Secure Intake, AI, and Confirmation
 
-- [ ] Task 26: Implement attachment collection and limits
-- [ ] Task 27: Implement secure image and PDF normalization
-- [ ] Task 28: Add CSV, Word, and Excel normalization safely
-- [ ] Task 29: Implement the Pi session factory and safety boundary
-- [ ] Task 30: Implement schema-validated extraction and history rehydration
-- [ ] Task 31: Implement resumable clarification, preview, and confirmation
+- [x] Task 26: Implement attachment collection and limits
+- [x] Task 27: Implement secure image and PDF normalization
+- [x] Task 28: Add CSV, Word, and Excel normalization safely
+- [x] Task 29: Implement the Pi session factory and safety boundary
+- [x] Task 30: Implement schema-validated extraction and history rehydration
+- [x] Task 31: Implement resumable clarification, preview, and confirmation
 
 ### Checkpoint: Read-Only Workflow Slice
 
@@ -187,11 +187,11 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 ### Phase 5: Quotation Vertical Slice
 
-- [ ] Task 32: Implement new Google Sheet and Doc creation
-- [ ] Task 33: Implement the paginated Version 1 Rust quotation renderer
+- [x] Task 32: Implement new Google Sheet and Doc creation
+- [x] Task 33: Implement the paginated Version 1 Rust quotation renderer
 - [ ] Task 34: Implement S3, Drive, and topic artifact delivery
 - [ ] Task 34A: Package quotation workflow Lambda handlers
-- [ ] Task 35: Implement confirmed existing-file modification
+- [x] Task 35: Implement confirmed existing-file modification
 
 ### Checkpoint: Quotation Flow Complete
 
