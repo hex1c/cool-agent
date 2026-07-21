@@ -19,6 +19,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
         with:
           toolchain: 1.97.0
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: "0.13.0"
       - run: cargo install cargo-lambda --locked --version 1.9.1
       - run: sam validate --lint --template-file infrastructure/spikes/rust-lambda.yaml
       - run: sam build --template-file infrastructure/spikes/rust-lambda.yaml
