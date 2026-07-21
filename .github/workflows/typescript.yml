@@ -2,24 +2,32 @@ name: TypeScript agent harness
 
 on:
   pull_request:
-    paths:
-      - 'services/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/typescript.yml'
   push:
     branches: [dev, staging, prod]
-    paths:
-      - 'services/**'
-      - 'package.json'
-      - 'package-lock.json'
-      - '.github/workflows/typescript.yml'
 
 permissions:
   contents: read
 
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.typescript }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3
+        id: filter
+        with:
+          filters: |
+            typescript:
+              - 'services/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - '.github/workflows/typescript.yml'
+
   typescript:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
