@@ -159,10 +159,10 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 ### Phase 3: Telegram and OAuth Vertical Slice
 
-- [ ] Task 22: Implement Telegram webhook verification and normalization
-- [ ] Task 23: Implement topic commands, callbacks, and safe delivery
-- [ ] Task 24: Implement private Google OAuth onboarding
-- [ ] Task 25: Wire webhook and OAuth Lambda entry points
+- [x] Task 22: Implement Telegram webhook verification and normalization
+- [x] Task 23: Implement topic commands, callbacks, and safe delivery
+- [x] Task 24: Implement private Google OAuth onboarding
+- [x] Task 25: Wire webhook and OAuth Lambda entry points
 
 ### Checkpoint: Intake and Identity Work Locally
 

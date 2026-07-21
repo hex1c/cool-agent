@@ -1,0 +1,37 @@
+{
+  "version": "2.0",
+  "routeKey": "GET /oauth/callback/{participantId}",
+  "rawPath": "/oauth/callback/42",
+  "rawQueryString": "code=fake-auth-code&state=fake-state-value",
+  "headers": {
+    "content-type": "application/json",
+    "host": "api.example.com"
+  },
+  "queryStringParameters": {
+    "code": "fake-auth-code",
+    "state": "fake-state-value"
+  },
+  "pathParameters": {
+    "participantId": "42"
+  },
+  "requestContext": {
+    "accountId": "123456789012",
+    "apiId": "api-id",
+    "domainName": "api.example.com",
+    "domainPrefix": "api",
+    "http": {
+      "method": "GET",
+      "path": "/oauth/callback/42",
+      "protocol": "HTTP/1.1",
+      "sourceIp": "203.0.113.1",
+      "userAgent": "Google-OAuth-Client"
+    },
+    "requestId": "id",
+    "routeKey": "GET /oauth/callback/{participantId}",
+    "stage": "$default",
+    "time": "12/Mar/2026:19:03:58 +0000",
+    "timeEpoch": 1741813438000
+  },
+  "body": null,
+  "isBase64Encoded": false
+}

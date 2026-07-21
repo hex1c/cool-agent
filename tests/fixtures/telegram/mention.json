@@ -1,0 +1,27 @@
+{
+  "update_id": 1001,
+  "message": {
+    "message_id": 5,
+    "from": {
+      "id": 111111111,
+      "is_bot": false,
+      "first_name": "Owner-A"
+    },
+    "chat": {
+      "id": -1001234567890,
+      "type": "supergroup",
+      "title": "Novus Dev Forum"
+    },
+    "date": 1717000000,
+    "message_thread_id": 10,
+    "is_topic_message": true,
+    "text": "@novus_bot start a quotation from these documents",
+    "entities": [
+      {
+        "type": "mention",
+        "offset": 0,
+        "length": 10
+      }
+    ]
+  }
+}

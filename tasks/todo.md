@@ -638,13 +638,13 @@ events while deduplicating `update_id` and rejecting unsupported chat types.
 
 **Acceptance criteria:**
 
-- [ ] Invalid webhook secret tokens are rejected before parsing business events.
-- [ ] Recorded fixtures normalize mentions, replies, callbacks, media, and commands correctly.
-- [ ] Duplicate and cross-topic updates cannot create or mutate another workflow.
+- [x] Invalid webhook secret tokens are rejected before parsing business events.
+- [x] Recorded fixtures normalize mentions, replies, callbacks, media, and commands correctly.
+- [x] Duplicate and cross-topic updates cannot create or mutate another workflow.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p telegram webhook normalize deduplicate`
+- [x] Tests pass: `cargo test -p telegram webhook normalize deduplicate`
 
 **Dependencies:** Safety Core Proven checkpoint, Tasks 1, 14, 17, 20
 
@@ -665,13 +665,13 @@ separate topic workflow delivery from private OAuth delivery.
 
 **Acceptance criteria:**
 
-- [ ] Start mentions and follow-up `/done`, `/status`, `/correct`, `/confirm`, `/stop` target only the current topic workflow.
-- [ ] Callback replay and stale preview revisions are rejected.
-- [ ] OAuth material cannot pass through topic delivery; Telegram sends use the shared three-attempt executor and persist terminal failures.
+- [x] Start mentions and follow-up `/done`, `/status`, `/correct`, `/confirm`, `/stop` target only the current topic workflow.
+- [x] Callback replay and stale preview revisions are rejected.
+- [x] OAuth material cannot pass through topic delivery; Telegram sends use the shared three-attempt executor and persist terminal failures.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p telegram commands callbacks delivery_privacy`
+- [x] Tests pass: `cargo test -p telegram commands callbacks delivery_privacy`
 
 **Dependencies:** Tasks 16, 22
 
@@ -693,15 +693,15 @@ chat only.
 
 **Acceptance criteria:**
 
-- [ ] State is short-lived, single-use, participant-bound, and replay-resistant.
-- [ ] Refresh tokens enter separate Parameter Store `SecureString` values; token
+- [x] State is short-lived, single-use, participant-bound, and replay-resistant.
+- [x] Refresh tokens enter separate Parameter Store `SecureString` values; token
   values never enter topics or logs.
-- [ ] Revocation pauses Google-dependent work without deleting history; token endpoint calls use the shared retry/ambiguity executor.
+- [x] Revocation pauses Google-dependent work without deleting history; token endpoint calls use the shared retry/ambiguity executor.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p oauth --all-features`
-- [ ] Integration check: mocked connect, refresh, revoke, and reconnect pass.
+- [x] Tests pass: `cargo test -p oauth --all-features`
+- [x] Integration check: mocked connect, refresh, revoke, and reconnect pass.
 
 **Dependencies:** Tasks 6, 21, 23
 
@@ -722,14 +722,14 @@ invoke the tested Telegram and OAuth application paths without domain logic.
 
 **Acceptance criteria:**
 
-- [ ] Handlers return bounded, typed HTTP responses for success and failure.
-- [ ] Webhook acknowledgment does not wait on long-running workflow work.
-- [ ] OAuth callback responses and logs contain no tokens or secret values.
+- [x] Handlers return bounded, typed HTTP responses for success and failure.
+- [x] Webhook acknowledgment does not wait on long-running workflow work.
+- [x] OAuth callback responses and logs contain no tokens or secret values.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p webhook-function -p oauth-function`
-- [ ] Local invoke succeeds for recorded webhook and OAuth fixtures.
+- [x] Tests pass: `cargo test -p webhook-function -p oauth-function`
+- [x] Local invoke succeeds for recorded webhook and OAuth fixtures.
 
 **Dependencies:** Tasks 3, 22-24
 
