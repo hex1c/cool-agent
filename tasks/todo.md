@@ -987,14 +987,14 @@ PDF, copying it to Drive, and returning the PDF and links in the same topic.
 
 **Acceptance criteria:**
 
-- [ ] S3 and Drive resource IDs are durable and retries do not duplicate copies.
-- [ ] Topic delivery always uses the originating `message_thread_id`.
-- [ ] S3, Drive, and Telegram operations use the shared executor; partial failure resumes after the last accepted operation.
+- [x] S3 and Drive resource IDs are durable and retries do not duplicate copies.
+- [x] Topic delivery always uses the originating `message_thread_id`.
+- [x] S3, Drive, and Telegram operations use the shared executor; partial failure resumes after the last accepted operation.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p application quotation_delivery`
-- [ ] Integration check: confirmed fixture creates one S3 object, one Drive copy, and one topic delivery record.
+- [x] Tests pass: `cargo test -p application quotation_delivery`
+- [x] Integration check: confirmed fixture creates one S3 object, one Drive copy, and one topic delivery record.
 
 **Dependencies:** Tasks 21, 23, 32-33
 
