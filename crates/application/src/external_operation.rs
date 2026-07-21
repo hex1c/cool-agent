@@ -205,46 +205,105 @@ pub enum ExecutionOutcome {
     },
 }
 
-/// Result of atomically reserving a logical operation key.
+/// Opaque claim token returned by a successful `begin_attempt`.
+/// The executor must present this token exactly once to `complete_attempt`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReservationOutcome {
-    /// This caller owns the reservation and may continue after validating history.
-    Acquired {
+pub struct AttemptClaim(String);
+
+impl AttemptClaim {
+    pub fn new(value: impl Into<String>) -> Result<Self, SanitizedValueError> {
+        let value = value.into();
+        if value.is_empty() || value.len() > 128 {
+            return Err(SanitizedValueError::InvalidLength {
+                field: "attempt claim",
+                maximum_bytes: 128,
+            });
+        }
+        if !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return Err(SanitizedValueError::InvalidCharacters {
+                field: "attempt claim",
+            });
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// Durable lifecycle of a journal entity.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JournalState {
+    /// Adapter state `prepared` or `retry_ready`; ready for a new or next attempt.
+    Ready {
         completed_attempts: Vec<CompletedAttempt>,
     },
-    /// Another invocation started an attempt whose provider result is not durable.
-    AlreadyInProgress {
-        started_attempt: AttemptNumber,
+    /// Adapter state `attempt_started`; its provider outcome is not yet durable.
+    InProgress {
+        attempt: AttemptNumber,
         completed_attempts: Vec<CompletedAttempt>,
     },
     /// The operation is final and must be replayed without provider invocation.
-    AlreadyCompleted(ExecutionOutcome),
+    Final(ExecutionOutcome),
 }
 
-/// Persistence boundary for Task 17. DynamoDB details remain in Tasks 19-20.
+/// Durable journal state returned by `OperationJournal::prepare`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JournalPreparation {
+    pub state: JournalState,
+}
+
+impl JournalPreparation {
+    pub const fn new(state: JournalState) -> Self {
+        Self { state }
+    }
+}
+
+/// Outcome of atomically beginning a single attempt.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BeginAttemptOutcome {
+    /// This caller owns the attempt and must present the claim to `complete_attempt`.
+    Acquired(AttemptClaim),
+    /// Another caller already began this attempt; the provider must not be invoked.
+    RaceLost,
+}
+
+/// Persistence boundary for safe external-operation lifecycle.
+///
+/// Callers must not invoke a provider unless `begin_attempt` returns an `AttemptClaim`.
+/// A crash after `begin_attempt` but before `complete_attempt` leaves the journal in
+/// `InProgress` state so the next `prepare` can escalate to manual review.
 #[allow(async_fn_in_trait)]
 pub trait OperationJournal {
     type Error: Display;
 
-    /// Atomically acquires a new or resumable reservation for one caller.
-    async fn reserve(&self, key: &IdempotencyKey) -> Result<ReservationOutcome, Self::Error>;
+    /// Creates or loads the durable state for a logical operation key.
+    async fn prepare(&self, key: &IdempotencyKey) -> Result<JournalPreparation, Self::Error>;
 
-    /// Records an in-flight attempt before any provider bytes are sent.
-    async fn record_attempt_started(
+    /// Atomically transitions the journal from Ready to InProgress.
+    /// Returns an opaque claim that must be presented to `complete_attempt`.
+    /// Returns `RaceLost` if another caller won the race; the provider must not be invoked.
+    async fn begin_attempt(
         &self,
         key: &IdempotencyKey,
         attempt: AttemptNumber,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<BeginAttemptOutcome, Self::Error>;
 
-    /// Records the provider result. Implementations must atomically make accepted,
-    /// terminal, and ambiguous outcomes final when writing this record.
-    async fn record_attempt_completed(
+    /// Records the provider result conditioned on the exact claim from `begin_attempt`.
+    /// Retryable failures return the journal to Ready so a subsequent `begin_attempt`
+    /// can continue. Accepted, terminal, and ambiguous outcomes become Final.
+    async fn complete_attempt(
         &self,
         key: &IdempotencyKey,
+        claim: &AttemptClaim,
         attempt: &CompletedAttempt,
     ) -> Result<(), Self::Error>;
 
-    /// Marks a fully retryable history as permanently exhausted.
+    /// Marks a fully retryable history as permanently exhausted (Final).
     async fn record_exhausted(
         &self,
         key: &IdempotencyKey,
@@ -285,6 +344,8 @@ pub enum ExecutionError<JournalError: Display, WaitError: Display> {
     PersistenceAfterInvocation(JournalError),
     Wait(WaitError),
     InvalidHistory(OperationHistoryError),
+    /// Another executor won the `begin_attempt` race; provider was not invoked.
+    RaceLost,
 }
 
 impl<JournalError: Display, WaitError: Display> Display
@@ -304,6 +365,8 @@ impl<JournalError: Display, WaitError: Display> Display
             ),
             Self::Wait(error) => write!(formatter, "external-operation backoff failed: {error}"),
             Self::InvalidHistory(error) => error.fmt(formatter),
+            Self::RaceLost => formatter
+                .write_str("begin attempt lost a concurrent race; provider was not invoked"),
         }
     }
 }
@@ -345,24 +408,24 @@ where
         Provider: Fn() -> ProviderFuture,
         ProviderFuture: std::future::Future<Output = ProviderOutcome>,
     {
-        let reservation = self
+        let preparation = self
             .journal
-            .reserve(key)
+            .prepare(key)
             .await
             .map_err(ExecutionError::PersistenceBeforeInvocation)?;
-        let mut completed_attempts = match reservation {
-            ReservationOutcome::AlreadyCompleted(outcome) => return Ok(outcome),
-            ReservationOutcome::AlreadyInProgress {
-                started_attempt,
+        let mut completed_attempts = match preparation.state {
+            JournalState::Final(outcome) => return Ok(outcome),
+            JournalState::InProgress {
+                attempt,
                 completed_attempts,
             } => {
                 return Ok(ExecutionOutcome::ManualReview {
-                    attempt: started_attempt,
+                    attempt,
                     failure: OperationFailure::interrupted_attempt(),
                     completed_attempts,
                 });
             }
-            ReservationOutcome::Acquired { completed_attempts } => completed_attempts,
+            JournalState::Ready { completed_attempts } => completed_attempts,
         };
 
         validate_retry_history(&completed_attempts, policy)
@@ -400,16 +463,21 @@ where
                 ),
             };
 
-            self.journal
-                .record_attempt_started(key, attempt)
+            let claim = match self
+                .journal
+                .begin_attempt(key, attempt)
                 .await
-                .map_err(ExecutionError::PersistenceBeforeInvocation)?;
+                .map_err(ExecutionError::PersistenceBeforeInvocation)?
+            {
+                BeginAttemptOutcome::Acquired(claim) => claim,
+                BeginAttemptOutcome::RaceLost => return Err(ExecutionError::RaceLost),
+            };
 
             let outcome = provider().await;
             provider_was_invoked = true;
             let completed = CompletedAttempt::new(attempt, outcome.clone(), delay_before_ms);
             self.journal
-                .record_attempt_completed(key, &completed)
+                .complete_attempt(key, &claim, &completed)
                 .await
                 .map_err(ExecutionError::PersistenceAfterInvocation)?;
             completed_attempts.push(completed);

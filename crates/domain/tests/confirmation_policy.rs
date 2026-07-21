@@ -274,6 +274,13 @@ fn approved_non_owner_consumes_confirmation_and_keeps_the_owner_principal()
     );
     assert_eq!(consumed.transition.audit.actor, participant(202)?);
     assert_eq!(consumed.transition.audit.owner, participant(101)?);
+    assert_eq!(consumed.authorization.actor, participant(202)?);
+    assert_eq!(consumed.authorization.topic, topic()?);
+    assert_eq!(consumed.authorization.source_message, MessageId::new(8)?);
+    assert_eq!(
+        consumed.authorization.membership_source,
+        MembershipAuthorizationSource::Live
+    );
     assert_eq!(consumed.confirmation.status(), ConfirmationStatus::Consumed);
     assert_eq!(
         consumed.confirmation.confirming_actor(),

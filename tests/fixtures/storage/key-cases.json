@@ -1,0 +1,131 @@
+{
+  "schemaVersion": "novus.storage-keys.v1",
+  "cases": [
+    {
+      "name": "development workflow metadata",
+      "environment": "development",
+      "table": "application",
+      "entity": "workflow",
+      "pk": "WF#workflow-17",
+      "sk": "META",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "production workflow metadata uses an isolated table",
+      "environment": "production",
+      "table": "application",
+      "entity": "workflow",
+      "pk": "WF#workflow-17",
+      "sk": "META",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "topic claim",
+      "environment": "development",
+      "table": "application",
+      "entity": "topic_claim",
+      "pk": "TOPIC#-1001234567890#42",
+      "sk": "WORKFLOW",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "ordered transition audit",
+      "environment": "development",
+      "table": "application",
+      "entity": "audit",
+      "pk": "WF#workflow-17",
+      "sk": "AUDIT#00000000000000000004",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "pending confirmation",
+      "environment": "development",
+      "table": "application",
+      "entity": "confirmation",
+      "pk": "WF#workflow-17",
+      "sk": "CONFIRMATION#confirmation-4",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "external operation journal",
+      "environment": "development",
+      "table": "application",
+      "entity": "operation_journal",
+      "pk": "OP#workflow-17#00000000000000000004#google_write#0101010101010101010101010101010101010101010101010101010101010101",
+      "sk": "META",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "ordered sanitized history pointer",
+      "environment": "development",
+      "table": "application",
+      "entity": "history_pointer",
+      "pk": "WF#workflow-17",
+      "sk": "HISTORY#00000000000000000009",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "raw attachment object metadata",
+      "environment": "development",
+      "table": "application",
+      "entity": "object_metadata",
+      "pk": "WF#workflow-17",
+      "sk": "OBJECT#raw#attachment-9",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "oauth state digest",
+      "environment": "development",
+      "table": "application",
+      "entity": "oauth_state",
+      "pk": "OAUTH#0202020202020202020202020202020202020202020202020202020202020202",
+      "sk": "META",
+      "ttlCleanupOnly": true
+    },
+    {
+      "name": "membership approval cache",
+      "environment": "development",
+      "table": "application",
+      "entity": "membership_cache",
+      "pk": "MEMBERSHIP#-1001234567890#42",
+      "sk": "META",
+      "ttlCleanupOnly": true
+    },
+    {
+      "name": "monthly budget aggregate",
+      "environment": "development",
+      "table": "budget",
+      "entity": "budget_aggregate",
+      "pk": "MONTH#2026-07",
+      "sk": "AGGREGATE",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "monthly budget reservation",
+      "environment": "development",
+      "table": "budget",
+      "entity": "budget_reservation",
+      "pk": "MONTH#2026-07",
+      "sk": "RESERVATION#operation-17",
+      "ttlCleanupOnly": true
+    },
+    {
+      "name": "approved pricing decision",
+      "environment": "development",
+      "table": "budget",
+      "entity": "pricing_decision",
+      "pk": "MONTH#2026-07",
+      "sk": "PRICING#catalog-v1",
+      "ttlCleanupOnly": false
+    },
+    {
+      "name": "attributed reconciliation record",
+      "environment": "development",
+      "table": "budget",
+      "entity": "reconciliation",
+      "pk": "MONTH#2026-07",
+      "sk": "RECONCILIATION#2026-07-17T12:00:00Z#record-1",
+      "ttlCleanupOnly": false
+    }
+  ]
+}
