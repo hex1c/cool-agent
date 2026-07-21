@@ -2,26 +2,33 @@ name: SAM build
 
 on:
   pull_request:
-    paths:
-      - 'functions/**'
-      - 'infrastructure/**'
-      - 'tests/fixtures/sam/**'
-      - 'Cargo.lock'
-      - '.github/workflows/sam.yml'
   push:
     branches: [dev, staging, prod]
-    paths:
-      - 'functions/**'
-      - 'infrastructure/**'
-      - 'tests/fixtures/sam/**'
-      - 'Cargo.lock'
-      - '.github/workflows/sam.yml'
 
 permissions:
   contents: read
 
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.sam }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3
+        id: filter
+        with:
+          filters: |
+            sam:
+              - 'functions/**'
+              - 'infrastructure/**'
+              - 'tests/fixtures/sam/**'
+              - 'Cargo.lock'
+              - '.github/workflows/sam.yml'
+
   sam:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0

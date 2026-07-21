@@ -2,28 +2,34 @@ name: Rust
 
 on:
   pull_request:
-    paths:
-      - 'crates/**'
-      - 'functions/**'
-      - 'tests/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/rust.yml'
   push:
     branches: [dev, staging, prod]
-    paths:
-      - 'crates/**'
-      - 'functions/**'
-      - 'tests/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/rust.yml'
 
 permissions:
   contents: read
 
 jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: dorny/paths-filter@6852f92c20ea7fd3b0c25de3b5112db3a98da050 # v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'crates/**'
+              - 'functions/**'
+              - 'tests/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/rust.yml'
+
   rust:
+    needs: detect
+    if: needs.detect.outputs.changed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
