@@ -1014,14 +1014,14 @@ function package without duplicating application or adapter logic.
 
 **Acceptance criteria:**
 
-- [ ] Each handler deserializes a versioned event, calls one application port, and returns a typed result.
-- [ ] Handler IAM needs and timeout/memory requirements are documented for SAM.
-- [ ] Local fixtures cover success, retryable failure, and terminal failure.
+- [x] Each handler deserializes a versioned event, calls one application port, and returns a typed result.
+- [x] Handler IAM needs and timeout/memory requirements are documented for SAM.
+- [x] Local fixtures cover success, retryable failure, and terminal failure.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p workflow-actions-functions`
-- [ ] Build succeeds: `cargo build -p workflow-actions-functions`
+- [x] Tests pass: `cargo test -p workflow-actions-functions`
+- [x] Build succeeds: `cargo build -p workflow-actions-functions`
 
 **Dependencies:** Task 34
 
