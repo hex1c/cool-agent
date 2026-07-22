@@ -201,7 +201,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 ### Phase 6: Calendar and Email Slices
 
-- [ ] Task 36: Implement the confirmed Calendar workflow
+- [x] Task 36: Implement the confirmed Calendar workflow
 - [ ] Task 37: Implement the confirmed Hostinger email workflow
 - [ ] Task 37A: Package Google, Calendar, and email Lambda handlers
 
