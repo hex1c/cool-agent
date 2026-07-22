@@ -29,7 +29,11 @@ use std::fmt::{Debug, Display, Formatter};
 use std::future::ready;
 use std::sync::{Arc, Mutex};
 
-use application::calendar::{CalendarFlowError, CalendarOperationService};
+use application::calendar::{
+    CalendarConfirmationError, CalendarConfirmationService, CalendarFlowError,
+    CalendarOperationService, CalendarPreview, CalendarPreviewError, CalendarReminders,
+    CalendarTarget, IssueCalendarConfirmationRequest,
+};
 use application::external_operation::{
     AttemptClaim, BackoffWait, BeginAttemptOutcome, CompletedAttempt, ExecutionError,
     ExecutionOutcome, ExternalOperationExecutor, ExternalResourceId, JitterSource,
@@ -316,21 +320,39 @@ fn authorized_participant(at: u64) -> domain::authorization::AuthorizedParticipa
     .expect("authorized participant")
 }
 
-fn preview() -> Preview {
+fn preview() -> CalendarPreview {
+    CalendarPreview::new(
+        "Strategy sync".to_owned(),
+        "2025-02-03T10:00:00+05:30".to_owned(),
+        "2025-02-03T11:00:00+05:30".to_owned(),
+        "Asia/Kolkata".to_owned(),
+        CalendarTarget::Primary,
+        Some("Quarterly planning".to_owned()),
+        vec!["alice@example.com".to_owned(), "bob@example.com".to_owned()],
+        CalendarReminders {
+            push_minutes: Some(10),
+            email_minutes: None,
+        },
+        true,
+    )
+    .expect("valid preview")
+}
+
+fn quotation_preview() -> Preview {
     Preview::new(
-        "INR".to_string(),
+        "INR".to_owned(),
         vec![PreviewLineItem {
-            description: "Calendar setup".to_string(),
-            quantity: "1".to_string(),
+            description: "PDF".to_owned(),
+            quantity: "1".to_owned(),
             unit_price_micro_inr: 0,
         }],
-        vec!["owner calendar timezone default".to_string()],
+        Vec::new(),
         0,
         0,
         0,
         0,
     )
-    .expect("valid preview")
+    .expect("quotation preview")
 }
 
 fn policy() -> RetryPolicy {
@@ -352,43 +374,37 @@ fn ambiguous_outcome() -> ProviderOutcome {
     ProviderOutcome::Ambiguous(failure)
 }
 
-fn waiting_for_confirmation() -> (Workflow, Preview, ConfirmationRecord) {
-    let svc = ResumableConfirmationService;
+fn waiting_for_confirmation() -> (Workflow, CalendarPreview, ConfirmationRecord) {
     let wf = drafting_completed();
-    let p = preview();
-    let outcome = svc
-        .issue_confirmation(
-            &wf,
-            IssueConfirmationRequest {
-                preview: &p,
-                action: ConfirmationAction::StartCalendarOrEmailAction,
-                target_label: "calendar-event",
-                confirmation_id: ConfirmationId::new("confirmation-calendar").expect("conf id"),
-                actor: participant(202),
-                source_message: MessageId::new(7).expect("message id"),
-                deadline: WaitDeadline::at(time(43_200)),
-                timestamp: time(7),
-            },
-        )
-        .expect("issue confirmation");
+    let preview = preview();
+    let outcome = CalendarConfirmationService::issue(
+        &wf,
+        IssueCalendarConfirmationRequest {
+            preview: &preview,
+            confirmation_id: ConfirmationId::new("confirmation-calendar").expect("conf id"),
+            actor: participant(202),
+            source_message: MessageId::new(7).expect("message id"),
+            deadline: WaitDeadline::at(time(43_200)),
+            timestamp: time(7),
+        },
+    )
+    .expect("issue confirmation");
     let record = ConfirmationRecord::from(outcome.confirmation);
-    (outcome.transition.workflow, p, record)
+    (outcome.transition.workflow, preview, record)
 }
 
 fn consume_fresh(
     record: &ConfirmationRecord,
     wf: &Workflow,
-    preview: &Preview,
+    preview: &CalendarPreview,
     at: u64,
 ) -> ConfirmationConsumption {
-    let svc = ResumableConfirmationService;
     let authz = authorized_participant(at).for_workflow(wf);
-    svc.consume_confirmation(
+    CalendarConfirmationService::consume(
         record,
         wf,
         &authz,
         preview,
-        "calendar-event",
         TopicMessageReference::new(
             topic(),
             MessageId::new(i64::try_from(at).unwrap()).expect("msg"),
@@ -401,6 +417,79 @@ fn consume_fresh(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[test]
+fn calendar_preview_rejects_invalid_or_reversed_timestamps() {
+    let invalid = CalendarPreview::new(
+        "Sync".to_owned(),
+        "not-a-timestamp".to_owned(),
+        "2025-02-03T11:00:00Z".to_owned(),
+        "UTC".to_owned(),
+        CalendarTarget::Primary,
+        None,
+        Vec::new(),
+        CalendarReminders {
+            push_minutes: Some(10),
+            email_minutes: None,
+        },
+        false,
+    );
+    assert!(matches!(
+        invalid,
+        Err(CalendarPreviewError::InvalidTimestamp)
+    ));
+
+    let reversed = CalendarPreview::new(
+        "Sync".to_owned(),
+        "2025-02-03T12:00:00Z".to_owned(),
+        "2025-02-03T11:00:00Z".to_owned(),
+        "UTC".to_owned(),
+        CalendarTarget::Primary,
+        None,
+        Vec::new(),
+        CalendarReminders {
+            push_minutes: Some(10),
+            email_minutes: None,
+        },
+        false,
+    );
+    assert!(matches!(
+        reversed,
+        Err(CalendarPreviewError::InvalidTimeRange)
+    ));
+}
+
+#[test]
+fn changed_invitation_choice_cannot_consume_confirmed_preview() {
+    let (wf, original, record) = waiting_for_confirmation();
+    let changed = CalendarPreview::new(
+        original.title().to_owned(),
+        original.start().to_owned(),
+        original.end().to_owned(),
+        original.timezone().to_owned(),
+        original.calendar().clone(),
+        original.description().map(str::to_owned),
+        original.attendees().to_vec(),
+        original.reminders().clone(),
+        false,
+    )
+    .expect("changed preview");
+    let authz = authorized_participant(8).for_workflow(&wf);
+    let result = CalendarConfirmationService::consume(
+        &record,
+        &wf,
+        &authz,
+        &changed,
+        TopicMessageReference::new(topic(), MessageId::new(8).expect("message")),
+        time(8),
+    );
+    assert!(matches!(
+        result,
+        Err(CalendarConfirmationError::Confirmation(
+            ConfirmationError::PreviewDigestMismatch
+        ))
+    ));
+}
 
 #[tokio::test]
 async fn prepare_binds_consumed_confirmation_to_google_write_key() {
@@ -444,25 +533,21 @@ async fn stale_confirmation_rejected_before_any_provider_write() {
     let consumed_record = consumption.confirmation().clone();
     assert_eq!(consumed_record.status(), ConfirmationStatus::Consumed);
 
-    let svc = ResumableConfirmationService;
     let authz = authorized_participant(9).for_workflow(&wf);
     let source = TopicMessageReference::new(topic(), MessageId::new(9).expect("msg"));
-    let result = svc.consume_confirmation(
+    let result = CalendarConfirmationService::consume(
         &consumed_record,
         &wf,
         &authz,
         &preview,
-        "calendar-event",
         source,
         time(9),
     );
     assert!(matches!(
         result,
-        Err(
-            application::resumable_confirmation::ResumableError::Confirmation(
-                ConfirmationError::AlreadyConsumed
-            )
-        )
+        Err(CalendarConfirmationError::Confirmation(
+            ConfirmationError::AlreadyConsumed
+        ))
     ));
 }
 
@@ -580,7 +665,7 @@ async fn wrong_action_kind_pair_rejected_at_prepare() {
     // action-kind pair.
     let svc = ResumableConfirmationService;
     let wf = drafting_completed();
-    let p = preview();
+    let p = quotation_preview();
     let outcome = svc
         .issue_confirmation(
             &wf,

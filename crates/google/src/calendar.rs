@@ -17,6 +17,7 @@
 
 use std::fmt::{self, Display};
 
+use application::calendar::{CalendarPreview, CalendarTarget};
 use application::external_operation::{
     ExternalResourceId, FailureCode, OperationFailure, ProviderOutcome, SanitizedSummary,
 };
@@ -26,7 +27,7 @@ use domain::idempotency::OperationTargetFingerprint;
 use domain::identity::ParticipantId;
 use domain::workflow::WorkflowRevision;
 
-use crate::auth::GoogleAccessToken;
+use crate::auth::{GoogleAccessToken, OwnerTokenSource};
 
 // ── bounded value types ───────────────────────────────────────────────
 
@@ -35,7 +36,6 @@ const MAX_TIMEZONE_BYTES: usize = 64;
 const MAX_DESCRIPTION_BYTES: usize = 2048;
 const MAX_CALENDAR_ID_BYTES: usize = 256;
 const MAX_EMAIL_BYTES: usize = 320;
-const MAX_ATTENDEES: usize = 200;
 const MAX_TIMESTAMP_BYTES: usize = 64;
 const MAX_REMINDER_MINUTES: u16 = 40_320; // 28 days
 
@@ -85,10 +85,7 @@ impl TimezoneLabel {
     }
 }
 
-/// A validated RFC3339-style event boundary timestamp.
-///
-/// The adapter does not parse the wall-clock value; it bounds its length and
-/// character set so the provider receives only a small, opaque, ASCII string.
+/// An RFC3339 event boundary validated by [`CalendarPreview`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct EventTimestamp(String);
 
@@ -262,42 +259,41 @@ pub struct CalendarEventRequest {
 }
 
 impl CalendarEventRequest {
-    /// Build a validated event request.
-    ///
-    /// The `target_fingerprint` must equal the confirmation's
-    /// mutation-target fingerprint; the service enforces that before invoking
-    /// the provider.
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        title: EventTitle,
-        start: EventTimestamp,
-        end: EventTimestamp,
-        timezone: TimezoneLabel,
-        calendar: CalendarSelection,
-        description: Option<EventDescription>,
-        attendees: Vec<AttendeeEmail>,
-        reminders: ReminderSettings,
-        send_invitations: bool,
-        target_fingerprint: OperationTargetFingerprint,
-    ) -> Result<Self, CalendarError> {
-        if attendees.len() > MAX_ATTENDEES {
-            return Err(CalendarError::TooManyAttendees);
-        }
-        // Attendee invitations require at least one attendee when requested.
-        if send_invitations && attendees.is_empty() {
-            return Err(CalendarError::InvitationsWithoutAttendees);
-        }
+    /// Build the provider request only from the exact canonical preview shown
+    /// to participants. Callers cannot supply an independent fingerprint.
+    pub fn from_preview(preview: &CalendarPreview) -> Result<Self, CalendarError> {
+        let calendar = match preview.calendar() {
+            CalendarTarget::Primary => CalendarSelection::Primary,
+            CalendarTarget::Alternate { calendar_id } => {
+                CalendarSelection::Alternate(CalendarId::new(calendar_id.clone())?)
+            }
+        };
+        let attendees = preview
+            .attendees()
+            .iter()
+            .map(|email| AttendeeEmail::new(email.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let reminders = ReminderSettings::new(
+            preview.reminders().push_minutes,
+            preview.reminders().email_minutes,
+        )?;
+        let mutation_target = preview
+            .mutation_target()
+            .map_err(|_| CalendarError::PreviewBinding)?;
         Ok(Self {
-            title,
-            start,
-            end,
-            timezone,
+            title: EventTitle::new(preview.title().to_owned())?,
+            start: EventTimestamp::new(preview.start().to_owned())?,
+            end: EventTimestamp::new(preview.end().to_owned())?,
+            timezone: TimezoneLabel::new(preview.timezone().to_owned())?,
             calendar,
-            description,
+            description: preview
+                .description()
+                .map(|value| EventDescription::new(value.to_owned()))
+                .transpose()?,
             attendees,
             reminders,
-            send_invitations,
-            target_fingerprint,
+            send_invitations: preview.send_invitations(),
+            target_fingerprint: OperationTargetFingerprint::new(*mutation_target.as_bytes()),
         })
     }
 
@@ -400,14 +396,28 @@ pub enum CalendarProviderOutcome {
     Terminal,
 }
 
+/// Provider access decision for an explicitly selected alternate calendar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CalendarAccess {
+    Writable,
+    Denied,
+}
+
 /// Google Calendar provider client boundary.
 ///
 /// Implementations translate the validated [`CalendarEventRequest`] into a
 /// Calendar API insert call using the workflow owner's access token. They must
-/// not recompute or mutate any extracted value.
+/// not recompute or mutate any extracted value. Alternate calendars are
+/// checked for writable access before insertion.
 #[allow(async_fn_in_trait)]
 pub trait GoogleCalendarClient {
     type Error: Display + fmt::Debug;
+
+    async fn calendar_access(
+        &self,
+        token: &GoogleAccessToken,
+        calendar: &CalendarId,
+    ) -> Result<CalendarAccess, Self::Error>;
 
     async fn create_event(
         &self,
@@ -438,6 +448,8 @@ pub enum CalendarError {
     TooManyAttendees,
     #[error("send_invitations set without any attendees")]
     InvitationsWithoutAttendees,
+    #[error("calendar preview could not be bound to an operation target")]
+    PreviewBinding,
     #[error("confirmation does not authorize this calendar action")]
     Unauthorized,
     #[error("mutation target mismatch")]
@@ -490,21 +502,54 @@ impl<Client: GoogleCalendarClient> GoogleCalendarService<Client> {
         Ok(())
     }
 
-    /// Create the event after validating the proof, returning a
-    /// [`ProviderOutcome`] for the shared executor.
+    /// Resolve the workflow owner's token, verify alternate-calendar access,
+    /// then create the event. No arbitrary token can be supplied by callers.
     ///
     /// `Accepted` carries the stable event resource id. `Ambiguous` and
     /// `TerminalFailure` carry sanitized failure metadata only — never the
     /// request payload, attendee emails, or token.
-    pub async fn create_event(
+    pub async fn create_event<TokenSource>(
         &self,
-        token: &GoogleAccessToken,
+        token_source: &TokenSource,
         proof: &ConfirmedCalendarProof,
         request: &CalendarEventRequest,
-    ) -> Result<ProviderOutcome, CreateEventError> {
+    ) -> Result<ProviderOutcome, CreateEventError>
+    where
+        TokenSource: OwnerTokenSource,
+    {
         Self::validate(proof, request)?;
+        let token = match token_source.access_token(proof.owner()).await {
+            Ok(token) => token,
+            Err(_) => {
+                let f = failure(
+                    "google_owner_token_unavailable",
+                    "workflow owner google token is unavailable",
+                )?;
+                return Ok(ProviderOutcome::RetryableFailure(f));
+            }
+        };
 
-        match self.client.create_event(token, request).await {
+        if let CalendarSelection::Alternate(calendar) = request.calendar() {
+            match self.client.calendar_access(&token, calendar).await {
+                Ok(CalendarAccess::Writable) => {}
+                Ok(CalendarAccess::Denied) => {
+                    let f = failure(
+                        "google_calendar_access_denied",
+                        "workflow owner cannot write to selected calendar",
+                    )?;
+                    return Ok(ProviderOutcome::TerminalFailure(f));
+                }
+                Err(_) => {
+                    let f = failure(
+                        "google_calendar_access_failed",
+                        "selected calendar access check failed",
+                    )?;
+                    return Ok(ProviderOutcome::RetryableFailure(f));
+                }
+            }
+        }
+
+        match self.client.create_event(&token, request).await {
             Ok(CalendarProviderOutcome::Created(id)) => Ok(ProviderOutcome::Accepted {
                 resource_id: Some(id),
             }),
@@ -539,6 +584,14 @@ impl<Client: GoogleCalendarClient> GoogleCalendarService<Client> {
 impl GoogleCalendarClient for () {
     type Error = std::convert::Infallible;
 
+    async fn calendar_access(
+        &self,
+        _token: &GoogleAccessToken,
+        _calendar: &CalendarId,
+    ) -> Result<CalendarAccess, Self::Error> {
+        unreachable!("unit validate tests never invoke the client")
+    }
+
     async fn create_event(
         &self,
         _token: &GoogleAccessToken,
@@ -549,174 +602,108 @@ impl GoogleCalendarClient for () {
 }
 
 #[cfg(test)]
-#[allow(
-    clippy::expect_used,
-    clippy::unwrap_used,
-    clippy::indexing_slicing,
-    clippy::panic
-)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
 mod tests {
+    use application::calendar::{CalendarReminders, CalendarTarget};
+
     use super::*;
 
-    fn op_target(bytes: [u8; 32]) -> OperationTargetFingerprint {
-        OperationTargetFingerprint::new(bytes)
-    }
-
-    fn target_fingerprint() -> OperationTargetFingerprint {
-        op_target([7u8; 32])
-    }
-
-    fn reminders() -> ReminderSettings {
-        ReminderSettings::new(Some(10), None).expect("reminders")
-    }
-
-    fn attendees() -> Vec<AttendeeEmail> {
-        vec![
-            AttendeeEmail::new("alice@example.com").expect("attendee"),
-            AttendeeEmail::new("bob@example.com").expect("attendee"),
-        ]
-    }
-
-    fn valid_request(send_invitations: bool) -> CalendarEventRequest {
-        CalendarEventRequest::new(
-            EventTitle::new("Strategy sync").unwrap(),
-            EventTimestamp::new("2025-02-03T10:00:00+05:30").unwrap(),
-            EventTimestamp::new("2025-02-03T11:00:00+05:30").unwrap(),
-            TimezoneLabel::new("Asia/Kolkata").unwrap(),
-            CalendarSelection::Primary,
-            None,
-            attendees(),
-            reminders(),
-            send_invitations,
-            target_fingerprint(),
-        )
-        .expect("valid request")
-    }
-
-    #[test]
-    fn rejects_empty_or_oversized_title() {
-        assert!(EventTitle::new("").is_err());
-        assert!(EventTitle::new("   ").is_err());
-        assert!(EventTitle::new("x".repeat(MAX_TITLE_BYTES + 1)).is_err());
-        assert!(EventTitle::new("control\x00char").is_err());
-    }
-
-    #[test]
-    fn rejects_invalid_timezone() {
-        assert!(TimezoneLabel::new("").is_err());
-        assert!(TimezoneLabel::new("Asia Kolkata").is_err());
-        assert!(TimezoneLabel::new("Asia/Kolkata\n").is_err());
-        assert!(TimezoneLabel::new("Asia/Kolkata").is_ok());
-    }
-
-    #[test]
-    fn rejects_invalid_attendee_email() {
-        assert!(AttendeeEmail::new("not-an-email").is_err());
-        assert!(AttendeeEmail::new("a@").is_err());
-        assert!(AttendeeEmail::new("@example.com").is_err());
-        assert!(AttendeeEmail::new("a b@example.com").is_err());
-        assert!(AttendeeEmail::new("a@example.com").is_ok());
-    }
-
-    #[test]
-    fn reminder_settings_require_at_least_one_channel() {
-        assert!(ReminderSettings::new(None, None).is_err());
-        assert!(ReminderSettings::new(Some(0), None).is_ok());
-        assert!(ReminderSettings::new(None, Some(30)).is_ok());
-        assert!(ReminderSettings::new(Some(10), Some(60)).is_ok());
-        assert!(ReminderSettings::new(Some(MAX_REMINDER_MINUTES + 1), None).is_err());
-    }
-
-    #[test]
-    fn request_rejects_invitations_without_attendees() {
-        let err = CalendarEventRequest::new(
-            EventTitle::new("Sync").unwrap(),
-            EventTimestamp::new("2025-02-03T10:00:00Z").unwrap(),
-            EventTimestamp::new("2025-02-03T11:00:00Z").unwrap(),
-            TimezoneLabel::new("UTC").unwrap(),
-            CalendarSelection::Primary,
-            None,
-            Vec::new(),
-            reminders(),
+    fn preview(calendar: CalendarTarget) -> CalendarPreview {
+        CalendarPreview::new(
+            "Strategy sync".to_owned(),
+            "2025-02-03T10:00:00+05:30".to_owned(),
+            "2025-02-03T11:00:00+05:30".to_owned(),
+            "Asia/Kolkata".to_owned(),
+            calendar,
+            Some("Quarterly planning".to_owned()),
+            vec!["alice@example.com".to_owned(), "bob@example.com".to_owned()],
+            CalendarReminders {
+                push_minutes: Some(10),
+                email_minutes: None,
+            },
             true,
-            target_fingerprint(),
         )
-        .expect_err("invitations without attendees rejected");
-        assert!(matches!(err, CalendarError::InvitationsWithoutAttendees));
+        .expect("valid preview")
     }
 
     #[test]
-    fn request_rejects_too_many_attendees() {
-        let mut many = Vec::new();
-        for i in 0..(MAX_ATTENDEES + 1) {
-            many.push(AttendeeEmail::new(format!("a{i}@example.com")).unwrap());
-        }
-        let err = CalendarEventRequest::new(
-            EventTitle::new("Sync").unwrap(),
-            EventTimestamp::new("2025-02-03T10:00:00Z").unwrap(),
-            EventTimestamp::new("2025-02-03T11:00:00Z").unwrap(),
-            TimezoneLabel::new("UTC").unwrap(),
-            CalendarSelection::Primary,
-            None,
-            many,
-            reminders(),
+    fn request_is_derived_from_exact_primary_preview() {
+        let preview = preview(CalendarTarget::Primary);
+        let request = CalendarEventRequest::from_preview(&preview).expect("request");
+        assert_eq!(request.calendar(), &CalendarSelection::Primary);
+        assert_eq!(request.title().as_str(), preview.title());
+        assert_eq!(request.start().as_str(), preview.start());
+        assert_eq!(request.end().as_str(), preview.end());
+        assert_eq!(request.timezone().as_str(), preview.timezone());
+        assert_eq!(request.attendees().len(), 2);
+        assert!(request.send_invitations());
+    }
+
+    #[test]
+    fn request_is_derived_from_exact_alternate_preview() {
+        let preview = preview(CalendarTarget::Alternate {
+            calendar_id: "work-calendar-123".to_owned(),
+        });
+        let request = CalendarEventRequest::from_preview(&preview).expect("request");
+        assert!(matches!(
+            request.calendar(),
+            CalendarSelection::Alternate(id) if id.as_str() == "work-calendar-123"
+        ));
+    }
+
+    #[test]
+    fn changing_confirmed_payload_changes_operation_target() {
+        let original = preview(CalendarTarget::Primary);
+        let changed = CalendarPreview::new(
+            original.title().to_owned(),
+            original.start().to_owned(),
+            original.end().to_owned(),
+            original.timezone().to_owned(),
+            CalendarTarget::Primary,
+            original.description().map(str::to_owned),
+            original.attendees().to_vec(),
+            CalendarReminders {
+                push_minutes: Some(10),
+                email_minutes: None,
+            },
             false,
-            target_fingerprint(),
         )
-        .expect_err("too many attendees rejected");
-        assert!(matches!(err, CalendarError::TooManyAttendees));
-    }
-
-    #[test]
-    fn request_allows_primary_calendar_default() {
-        let req = valid_request(true);
-        assert_eq!(req.calendar(), &CalendarSelection::Primary);
-        assert!(req.send_invitations());
-        assert_eq!(req.attendees().len(), 2);
-    }
-
-    #[test]
-    fn request_allows_alternate_calendar_selection() {
-        let alt = CalendarId::new("work-calendar-123").unwrap();
-        let req = CalendarEventRequest::new(
-            EventTitle::new("Sync").unwrap(),
-            EventTimestamp::new("2025-02-03T10:00:00Z").unwrap(),
-            EventTimestamp::new("2025-02-03T11:00:00Z").unwrap(),
-            TimezoneLabel::new("UTC").unwrap(),
-            CalendarSelection::Alternate(alt),
-            None,
-            attendees(),
-            reminders(),
-            true,
-            target_fingerprint(),
-        )
-        .unwrap();
-        assert!(matches!(req.calendar(), CalendarSelection::Alternate(_)));
+        .expect("changed preview");
+        let original_request = CalendarEventRequest::from_preview(&original).expect("request");
+        let changed_request = CalendarEventRequest::from_preview(&changed).expect("request");
+        assert_ne!(
+            original_request.target_fingerprint(),
+            changed_request.target_fingerprint()
+        );
     }
 
     #[test]
     fn validate_rejects_target_mismatch() {
-        // Proof from a different confirmation target than the request.
+        let request =
+            CalendarEventRequest::from_preview(&preview(CalendarTarget::Primary)).expect("request");
         let proof = ConfirmedCalendarProof {
             owner: ParticipantId::new(101).unwrap(),
             mutation_target: MutationTargetFingerprint::new([9u8; 32]),
             preview_digest: PreviewDigest::new([1u8; 32]),
             workflow_revision: WorkflowRevision::new(2),
         };
-        let req = valid_request(false);
-        let result = GoogleCalendarService::<()>::validate(&proof, &req);
-        assert!(matches!(result, Err(CreateEventError::TargetMismatch)));
+        assert!(matches!(
+            GoogleCalendarService::<()>::validate(&proof, &request),
+            Err(CreateEventError::TargetMismatch)
+        ));
     }
 
     #[test]
     fn validate_accepts_matching_target() {
+        let preview = preview(CalendarTarget::Primary);
+        let request = CalendarEventRequest::from_preview(&preview).expect("request");
+        let mutation_target = preview.mutation_target().expect("target");
         let proof = ConfirmedCalendarProof {
             owner: ParticipantId::new(101).unwrap(),
-            mutation_target: MutationTargetFingerprint::new([7u8; 32]),
-            preview_digest: PreviewDigest::new([1u8; 32]),
+            mutation_target,
+            preview_digest: preview.digest().expect("digest"),
             workflow_revision: WorkflowRevision::new(2),
         };
-        let req = valid_request(false);
-        GoogleCalendarService::<()>::validate(&proof, &req).expect("target matches");
+        GoogleCalendarService::<()>::validate(&proof, &request).expect("target matches");
     }
 }

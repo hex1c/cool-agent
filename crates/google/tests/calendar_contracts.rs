@@ -1,19 +1,4 @@
-//! Contract tests for the confirmed Google Calendar event creation adapter
-//! (Task 36).
-//!
-//! These tests prove the Task 36 acceptance criteria at the adapter layer:
-//! - A consumed confirmation with `StartCalendarOrEmailAction` yields a proof
-//!   bound to the workflow owner and mutation-target fingerprint.
-//! - Invitation-on and invitation-off fixtures each create exactly one event.
-//! - Reminder settings are carried into the request unchanged.
-//! - Owner-primary and alternate-calendar selections are honored.
-//! - Target mismatch and wrong-action confirmations are rejected before any
-//!   provider call.
-//! - Ambiguous and terminal provider outcomes map to sanitized
-//!   `ProviderOutcome`s without exposing attendee emails or the token.
-//!
-//! The provider is a recording mock; the application-level retry/idempotency
-//! binding is covered by `crates/application/tests/calendar_flow.rs`.
+//! Contract tests for the confirmed Google Calendar adapter (Task 36).
 
 #![allow(
     clippy::expect_used,
@@ -24,25 +9,21 @@
 
 use std::sync::Mutex;
 
+use application::calendar::{CalendarPreview, CalendarReminders, CalendarTarget};
 use application::external_operation::{ExternalResourceId, ProviderOutcome};
 use domain::confirmation::{
     ConfirmationAction, ConfirmationRecord, ConsumedConfirmation, MutationTargetFingerprint,
     PendingConfirmation, PreviewDigest, TopicMessageReference,
 };
-use domain::idempotency::OperationTargetFingerprint;
 use domain::identity::{
     ChatId, ConfirmationId, MessageId, MessageThreadId, ParticipantId, TopicSessionId, WorkflowId,
 };
 use domain::workflow::{WaitDeadline, WorkflowRevision, WorkflowTimestamp};
-
-use google::auth::GoogleAccessToken;
+use google::auth::{GoogleAccessToken, OwnerTokenSource};
 use google::calendar::{
-    CalendarError, CalendarId, CalendarProviderOutcome, CalendarSelection, ConfirmedCalendarProof,
-    EventTimestamp, EventTitle, GoogleCalendarClient, GoogleCalendarService, ReminderSettings,
-    TimezoneLabel,
+    CalendarAccess, CalendarError, CalendarProviderOutcome, CalendarSelection,
+    ConfirmedCalendarProof, GoogleCalendarClient, GoogleCalendarService,
 };
-
-// ── helpers ──────────────────────────────────────────────────────────────
 
 fn topic() -> TopicSessionId {
     TopicSessionId::new(ChatId::new(-1001), MessageThreadId::new(77).unwrap())
@@ -56,21 +37,10 @@ fn time(seconds: u64) -> WorkflowTimestamp {
     WorkflowTimestamp::from_unix_seconds(seconds)
 }
 
-fn fingerprint(bytes: [u8; 32]) -> MutationTargetFingerprint {
-    MutationTargetFingerprint::new(bytes)
-}
-
-fn op_fingerprint(bytes: [u8; 32]) -> OperationTargetFingerprint {
-    OperationTargetFingerprint::new(bytes)
-}
-
-fn digest(bytes: [u8; 32]) -> PreviewDigest {
-    PreviewDigest::new(bytes)
-}
-
 fn pending_confirmation(
     action: ConfirmationAction,
     target: MutationTargetFingerprint,
+    digest: PreviewDigest,
 ) -> PendingConfirmation {
     PendingConfirmation::new(
         ConfirmationId::new("conf-cal-1").unwrap(),
@@ -78,7 +48,7 @@ fn pending_confirmation(
         WorkflowRevision::new(1),
         participant(101),
         topic(),
-        digest([0u8; 32]),
+        digest,
         target,
         action,
         WaitDeadline::at(time(86_400)),
@@ -88,291 +58,400 @@ fn pending_confirmation(
 fn consumed_record(
     action: ConfirmationAction,
     target: MutationTargetFingerprint,
+    digest: PreviewDigest,
 ) -> ConfirmationRecord {
     use domain::authorization::MembershipAuthorizationSource;
-    let pending = pending_confirmation(action, target);
-    let consumed = ConsumedConfirmation::new(
-        pending,
+
+    ConfirmationRecord::Consumed(ConsumedConfirmation::new(
+        pending_confirmation(action, target, digest),
         participant(202),
         MembershipAuthorizationSource::Live,
         TopicMessageReference::new(topic(), MessageId::new(8).unwrap()),
         time(8),
         WorkflowRevision::new(2),
-    );
-    ConfirmationRecord::Consumed(consumed)
+    ))
 }
 
-fn proof(target_bytes: [u8; 32]) -> ConfirmedCalendarProof {
+fn preview(send_invitations: bool, calendar: CalendarTarget) -> CalendarPreview {
+    CalendarPreview::new(
+        "Strategy sync".to_owned(),
+        "2025-02-03T10:00:00+05:30".to_owned(),
+        "2025-02-03T11:00:00+05:30".to_owned(),
+        "Asia/Kolkata".to_owned(),
+        calendar,
+        Some("Quarterly planning".to_owned()),
+        vec!["alice@example.com".to_owned(), "bob@example.com".to_owned()],
+        CalendarReminders {
+            push_minutes: Some(10),
+            email_minutes: None,
+        },
+        send_invitations,
+    )
+    .expect("valid calendar preview")
+}
+
+fn proof(preview: &CalendarPreview) -> ConfirmedCalendarProof {
     let record = consumed_record(
         ConfirmationAction::StartCalendarOrEmailAction,
-        fingerprint(target_bytes),
+        preview.mutation_target().expect("target"),
+        preview.digest().expect("digest"),
     );
-    ConfirmedCalendarProof::from_consumed(&record).expect("proof extracted")
+    ConfirmedCalendarProof::from_consumed(&record).expect("proof")
 }
 
-fn reminders(push: Option<u16>, email: Option<u16>) -> ReminderSettings {
-    ReminderSettings::new(push, email).expect("valid reminders")
+fn resource_id(value: &str) -> ExternalResourceId {
+    ExternalResourceId::new(value).expect("resource id")
 }
 
-fn event_request(
-    target_bytes: [u8; 32],
-    send_invitations: bool,
-    calendar: CalendarSelection,
-) -> google::calendar::CalendarEventRequest {
-    google::calendar::CalendarEventRequest::new(
-        EventTitle::new("Strategy sync").unwrap(),
-        EventTimestamp::new("2025-02-03T10:00:00+05:30").unwrap(),
-        EventTimestamp::new("2025-02-03T11:00:00+05:30").unwrap(),
-        TimezoneLabel::new("Asia/Kolkata").unwrap(),
-        calendar,
-        None,
-        vec![
-            google::calendar::AttendeeEmail::new("alice@example.com").unwrap(),
-            google::calendar::AttendeeEmail::new("bob@example.com").unwrap(),
-        ],
-        reminders(Some(10), None),
-        send_invitations,
-        op_fingerprint(target_bytes),
-    )
-    .expect("valid event request")
+#[derive(Debug, Clone, Copy)]
+enum AccessBehavior {
+    Writable,
+    Denied,
+    Error,
 }
 
-// ── mock clients ─────────────────────────────────────────────────────────
+#[derive(Debug, Clone)]
+enum CreateBehavior {
+    Outcome(CalendarProviderOutcome),
+    Error,
+}
 
 struct RecordingCalendarClient {
-    calls: Mutex<u32>,
+    access_behavior: AccessBehavior,
+    create_behavior: CreateBehavior,
+    access_calls: Mutex<u32>,
+    create_calls: Mutex<u32>,
     last_send_invitations: Mutex<Option<bool>>,
-    outcome: CalendarProviderOutcome,
 }
 
 impl RecordingCalendarClient {
-    fn new(outcome: CalendarProviderOutcome) -> Self {
+    fn new(access_behavior: AccessBehavior, create_behavior: CreateBehavior) -> Self {
         Self {
-            calls: Mutex::new(0),
+            access_behavior,
+            create_behavior,
+            access_calls: Mutex::new(0),
+            create_calls: Mutex::new(0),
             last_send_invitations: Mutex::new(None),
-            outcome,
         }
     }
 
-    fn call_count(&self) -> u32 {
-        *self.calls.lock().expect("lock poisoned")
+    fn access_call_count(&self) -> u32 {
+        *self.access_calls.lock().expect("access calls")
+    }
+
+    fn create_call_count(&self) -> u32 {
+        *self.create_calls.lock().expect("create calls")
     }
 
     fn last_send_invitations(&self) -> Option<bool> {
-        *self.last_send_invitations.lock().expect("lock poisoned")
+        *self.last_send_invitations.lock().expect("invitations")
     }
 }
 
 impl GoogleCalendarClient for RecordingCalendarClient {
     type Error = String;
 
+    async fn calendar_access(
+        &self,
+        _token: &GoogleAccessToken,
+        _calendar: &google::calendar::CalendarId,
+    ) -> Result<CalendarAccess, Self::Error> {
+        *self.access_calls.lock().expect("access calls") += 1;
+        match self.access_behavior {
+            AccessBehavior::Writable => Ok(CalendarAccess::Writable),
+            AccessBehavior::Denied => Ok(CalendarAccess::Denied),
+            AccessBehavior::Error => Err("access check failed".to_owned()),
+        }
+    }
+
     async fn create_event(
         &self,
         _token: &GoogleAccessToken,
         request: &google::calendar::CalendarEventRequest,
     ) -> Result<CalendarProviderOutcome, Self::Error> {
-        *self.calls.lock().expect("lock poisoned") += 1;
-        *self.last_send_invitations.lock().expect("lock poisoned") =
-            Some(request.send_invitations());
-        Ok(self.outcome.clone())
+        *self.create_calls.lock().expect("create calls") += 1;
+        *self.last_send_invitations.lock().expect("invitations") = Some(request.send_invitations());
+        match &self.create_behavior {
+            CreateBehavior::Outcome(outcome) => Ok(outcome.clone()),
+            CreateBehavior::Error => Err("create failed".to_owned()),
+        }
     }
 }
 
-struct FailingCalendarClient;
+#[derive(Debug)]
+struct RecordingTokenSource {
+    fail: bool,
+    requested_owners: Mutex<Vec<ParticipantId>>,
+}
 
-impl GoogleCalendarClient for FailingCalendarClient {
+impl RecordingTokenSource {
+    fn available() -> Self {
+        Self {
+            fail: false,
+            requested_owners: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn unavailable() -> Self {
+        Self {
+            fail: true,
+            requested_owners: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn requested_owners(&self) -> Vec<ParticipantId> {
+        self.requested_owners.lock().expect("owners").clone()
+    }
+}
+
+impl OwnerTokenSource for RecordingTokenSource {
     type Error = String;
 
-    async fn create_event(
-        &self,
-        _token: &GoogleAccessToken,
-        _request: &google::calendar::CalendarEventRequest,
-    ) -> Result<CalendarProviderOutcome, Self::Error> {
-        Err("calendar api unreachable".to_string())
+    async fn access_token(&self, owner: ParticipantId) -> Result<GoogleAccessToken, Self::Error> {
+        self.requested_owners.lock().expect("owners").push(owner);
+        if self.fail {
+            Err("token unavailable".to_owned())
+        } else {
+            Ok(GoogleAccessToken::new("owner-token".to_owned()))
+        }
     }
 }
 
-fn token() -> GoogleAccessToken {
-    GoogleAccessToken::new("owner-token".to_string())
+#[test]
+fn proof_requires_consumed_calendar_action() {
+    let preview = preview(false, CalendarTarget::Primary);
+    let target = preview.mutation_target().unwrap();
+    let digest = preview.digest().unwrap();
+
+    let valid = consumed_record(
+        ConfirmationAction::StartCalendarOrEmailAction,
+        target,
+        digest,
+    );
+    assert_eq!(
+        ConfirmedCalendarProof::from_consumed(&valid)
+            .expect("proof")
+            .owner(),
+        participant(101)
+    );
+
+    let pending = ConfirmationRecord::Pending(pending_confirmation(
+        ConfirmationAction::StartCalendarOrEmailAction,
+        target,
+        digest,
+    ));
+    assert!(matches!(
+        ConfirmedCalendarProof::from_consumed(&pending),
+        Err(CalendarError::Unauthorized)
+    ));
+
+    let wrong = consumed_record(ConfirmationAction::StartDirectPdfGeneration, target, digest);
+    assert!(matches!(
+        ConfirmedCalendarProof::from_consumed(&wrong),
+        Err(CalendarError::Unauthorized)
+    ));
 }
 
-fn resource_id(value: &str) -> ExternalResourceId {
-    ExternalResourceId::new(value).expect("valid resource id")
-}
-
-// ── proof tests ──────────────────────────────────────────────────────────
-
-mod proof {
-    use super::*;
-
-    #[test]
-    fn from_consumed_with_correct_action_succeeds() {
-        let record = consumed_record(
-            ConfirmationAction::StartCalendarOrEmailAction,
-            fingerprint([0u8; 32]),
+#[tokio::test]
+async fn invitation_on_and_off_each_create_one_owner_event() {
+    for (send_invitations, id) in [(true, "event-on"), (false, "event-off")] {
+        let preview = preview(send_invitations, CalendarTarget::Primary);
+        let request =
+            google::calendar::CalendarEventRequest::from_preview(&preview).expect("request");
+        let client = RecordingCalendarClient::new(
+            AccessBehavior::Writable,
+            CreateBehavior::Outcome(CalendarProviderOutcome::Created(resource_id(id))),
         );
-        let proof = ConfirmedCalendarProof::from_consumed(&record).expect("proof extracted");
-        assert_eq!(proof.owner(), participant(101));
-        assert_eq!(proof.mutation_target().as_bytes(), &[0u8; 32]);
-        assert_eq!(proof.workflow_revision().get(), 2);
-    }
-
-    #[test]
-    fn from_pending_record_rejected() {
-        let record = ConfirmationRecord::Pending(pending_confirmation(
-            ConfirmationAction::StartCalendarOrEmailAction,
-            fingerprint([0u8; 32]),
-        ));
-        let err = ConfirmedCalendarProof::from_consumed(&record).expect_err("unauthorized");
-        assert!(matches!(err, CalendarError::Unauthorized));
-    }
-
-    #[test]
-    fn from_consumed_with_wrong_action_rejected() {
-        let record = consumed_record(
-            ConfirmationAction::StartDirectPdfGeneration,
-            fingerprint([0u8; 32]),
-        );
-        let err = ConfirmedCalendarProof::from_consumed(&record).expect_err("unauthorized");
-        assert!(matches!(err, CalendarError::Unauthorized));
-    }
-}
-
-// ── calendar creation tests ──────────────────────────────────────────────
-
-mod calendar_creation {
-    use super::*;
-
-    #[tokio::test]
-    async fn invitation_on_creates_one_event() {
-        let target = [3u8; 32];
-        let client = RecordingCalendarClient::new(CalendarProviderOutcome::Created(resource_id(
-            "evt-invitation-on",
-        )));
         let service = GoogleCalendarService::new(client);
-        let req = event_request(target, true, CalendarSelection::Primary);
+        let tokens = RecordingTokenSource::available();
+
         let outcome = service
-            .create_event(&token(), &proof(target), &req)
+            .create_event(&tokens, &proof(&preview), &request)
             .await
             .expect("create event");
+
+        assert!(matches!(outcome, ProviderOutcome::Accepted { .. }));
+        assert_eq!(service.client().create_call_count(), 1);
+        assert_eq!(service.client().access_call_count(), 0);
+        assert_eq!(
+            service.client().last_send_invitations(),
+            Some(send_invitations)
+        );
+        assert_eq!(tokens.requested_owners(), vec![participant(101)]);
+    }
+}
+
+#[tokio::test]
+async fn altered_payload_is_rejected_before_token_or_client_call() {
+    let confirmed = preview(true, CalendarTarget::Primary);
+    let changed = preview(false, CalendarTarget::Primary);
+    let request = google::calendar::CalendarEventRequest::from_preview(&changed).expect("request");
+    let client = RecordingCalendarClient::new(
+        AccessBehavior::Writable,
+        CreateBehavior::Outcome(CalendarProviderOutcome::Created(resource_id("event"))),
+    );
+    let service = GoogleCalendarService::new(client);
+    let tokens = RecordingTokenSource::available();
+
+    let result = service
+        .create_event(&tokens, &proof(&confirmed), &request)
+        .await;
+
+    assert!(result.is_err());
+    assert!(tokens.requested_owners().is_empty());
+    assert_eq!(service.client().create_call_count(), 0);
+}
+
+#[tokio::test]
+async fn writable_alternate_calendar_is_checked_then_created() {
+    let preview = preview(
+        false,
+        CalendarTarget::Alternate {
+            calendar_id: "work-calendar".to_owned(),
+        },
+    );
+    let request = google::calendar::CalendarEventRequest::from_preview(&preview).expect("request");
+    assert!(matches!(
+        request.calendar(),
+        CalendarSelection::Alternate(_)
+    ));
+    let service = GoogleCalendarService::new(RecordingCalendarClient::new(
+        AccessBehavior::Writable,
+        CreateBehavior::Outcome(CalendarProviderOutcome::Created(resource_id("event-alt"))),
+    ));
+
+    let outcome = service
+        .create_event(
+            &RecordingTokenSource::available(),
+            &proof(&preview),
+            &request,
+        )
+        .await
+        .expect("create event");
+
+    assert!(matches!(outcome, ProviderOutcome::Accepted { .. }));
+    assert_eq!(service.client().access_call_count(), 1);
+    assert_eq!(service.client().create_call_count(), 1);
+}
+
+#[tokio::test]
+async fn denied_alternate_calendar_performs_zero_event_writes() {
+    let preview = preview(
+        false,
+        CalendarTarget::Alternate {
+            calendar_id: "denied-calendar".to_owned(),
+        },
+    );
+    let request = google::calendar::CalendarEventRequest::from_preview(&preview).expect("request");
+    let service = GoogleCalendarService::new(RecordingCalendarClient::new(
+        AccessBehavior::Denied,
+        CreateBehavior::Outcome(CalendarProviderOutcome::Created(resource_id(
+            "must-not-create",
+        ))),
+    ));
+
+    let outcome = service
+        .create_event(
+            &RecordingTokenSource::available(),
+            &proof(&preview),
+            &request,
+        )
+        .await
+        .expect("classified outcome");
+
+    assert!(matches!(outcome, ProviderOutcome::TerminalFailure(_)));
+    assert_eq!(service.client().access_call_count(), 1);
+    assert_eq!(service.client().create_call_count(), 0);
+}
+
+#[tokio::test]
+async fn failed_access_check_is_retryable_without_event_write() {
+    let preview = preview(
+        false,
+        CalendarTarget::Alternate {
+            calendar_id: "work-calendar".to_owned(),
+        },
+    );
+    let request = google::calendar::CalendarEventRequest::from_preview(&preview).expect("request");
+    let service = GoogleCalendarService::new(RecordingCalendarClient::new(
+        AccessBehavior::Error,
+        CreateBehavior::Outcome(CalendarProviderOutcome::Created(resource_id(
+            "must-not-create",
+        ))),
+    ));
+
+    let outcome = service
+        .create_event(
+            &RecordingTokenSource::available(),
+            &proof(&preview),
+            &request,
+        )
+        .await
+        .expect("classified outcome");
+
+    assert!(matches!(outcome, ProviderOutcome::RetryableFailure(_)));
+    assert_eq!(service.client().create_call_count(), 0);
+}
+
+#[tokio::test]
+async fn unavailable_owner_token_is_retryable_without_client_call() {
+    let preview = preview(false, CalendarTarget::Primary);
+    let request = google::calendar::CalendarEventRequest::from_preview(&preview).expect("request");
+    let service = GoogleCalendarService::new(RecordingCalendarClient::new(
+        AccessBehavior::Writable,
+        CreateBehavior::Outcome(CalendarProviderOutcome::Created(resource_id(
+            "must-not-create",
+        ))),
+    ));
+
+    let outcome = service
+        .create_event(
+            &RecordingTokenSource::unavailable(),
+            &proof(&preview),
+            &request,
+        )
+        .await
+        .expect("classified outcome");
+
+    assert!(matches!(outcome, ProviderOutcome::RetryableFailure(_)));
+    assert_eq!(service.client().access_call_count(), 0);
+    assert_eq!(service.client().create_call_count(), 0);
+}
+
+#[tokio::test]
+async fn provider_outcomes_map_to_shared_executor_classifications() {
+    for (behavior, expected) in [
+        (
+            CreateBehavior::Outcome(CalendarProviderOutcome::Ambiguous),
+            "ambiguous",
+        ),
+        (
+            CreateBehavior::Outcome(CalendarProviderOutcome::Terminal),
+            "terminal",
+        ),
+        (CreateBehavior::Error, "retryable"),
+    ] {
+        let preview = preview(false, CalendarTarget::Primary);
+        let request =
+            google::calendar::CalendarEventRequest::from_preview(&preview).expect("request");
+        let service = GoogleCalendarService::new(RecordingCalendarClient::new(
+            AccessBehavior::Writable,
+            behavior,
+        ));
+        let outcome = service
+            .create_event(
+                &RecordingTokenSource::available(),
+                &proof(&preview),
+                &request,
+            )
+            .await
+            .expect("classified outcome");
         assert!(matches!(
-            outcome,
-            ProviderOutcome::Accepted { ref resource_id } if resource_id.as_ref().is_some_and(|r| r.as_str() == "evt-invitation-on")
+            (expected, outcome),
+            ("ambiguous", ProviderOutcome::Ambiguous(_))
+                | ("terminal", ProviderOutcome::TerminalFailure(_))
+                | ("retryable", ProviderOutcome::RetryableFailure(_))
         ));
-        assert_eq!(service.client().call_count(), 1);
-        assert_eq!(service.client().last_send_invitations(), Some(true));
-    }
-
-    #[tokio::test]
-    async fn invitation_off_creates_one_event() {
-        let target = [4u8; 32];
-        let client = RecordingCalendarClient::new(CalendarProviderOutcome::Created(resource_id(
-            "evt-invitation-off",
-        )));
-        let service = GoogleCalendarService::new(client);
-        // send_invitations=false but attendees present is allowed (PRD §6.5
-        // step 7 — the invitation choice is a confirmation-bound field).
-        let req = event_request(target, false, CalendarSelection::Primary);
-        let outcome = service
-            .create_event(&token(), &proof(target), &req)
-            .await
-            .expect("create event");
-        assert!(matches!(outcome, ProviderOutcome::Accepted { .. }));
-        assert_eq!(service.client().call_count(), 1);
-        assert_eq!(service.client().last_send_invitations(), Some(false));
-    }
-
-    #[tokio::test]
-    async fn primary_calendar_selection_honored() {
-        let target = [5u8; 32];
-        let client = RecordingCalendarClient::new(CalendarProviderOutcome::Created(resource_id(
-            "evt-primary",
-        )));
-        let service = GoogleCalendarService::new(client);
-        let req = event_request(target, false, CalendarSelection::Primary);
-        let _ = service
-            .create_event(&token(), &proof(target), &req)
-            .await
-            .expect("create event");
-        assert_eq!(service.client().call_count(), 1);
-    }
-
-    #[tokio::test]
-    async fn alternate_calendar_selection_honored() {
-        let target = [6u8; 32];
-        let client =
-            RecordingCalendarClient::new(CalendarProviderOutcome::Created(resource_id("evt-alt")));
-        let service = GoogleCalendarService::new(client);
-        let alt = CalendarId::new("work-calendar-xyz").unwrap();
-        let req = event_request(target, false, CalendarSelection::Alternate(alt));
-        let outcome = service
-            .create_event(&token(), &proof(target), &req)
-            .await
-            .expect("create event");
-        assert!(matches!(outcome, ProviderOutcome::Accepted { .. }));
-        assert_eq!(service.client().call_count(), 1);
-    }
-
-    #[tokio::test]
-    async fn reminder_settings_carried_into_request() {
-        let target = [7u8; 32];
-        let req = event_request(target, false, CalendarSelection::Primary);
-        assert_eq!(req.reminders().push_minutes(), Some(10));
-        assert_eq!(req.reminders().email_minutes(), None);
-    }
-
-    #[tokio::test]
-    async fn target_mismatch_rejected_without_client_call() {
-        let proof_target = [1u8; 32];
-        let request_target = [2u8; 32];
-
-        let client = RecordingCalendarClient::new(CalendarProviderOutcome::Ambiguous);
-        let service = GoogleCalendarService::new(client);
-        let req = event_request(request_target, false, CalendarSelection::Primary);
-
-        let err = service
-            .create_event(&token(), &proof(proof_target), &req)
-            .await
-            .expect_err("target mismatch");
-        assert!(err.to_string().contains("target mismatch"));
-        assert_eq!(service.client().call_count(), 0);
-    }
-
-    #[tokio::test]
-    async fn ambiguous_outcome_maps_to_manual_review_provider_outcome() {
-        let target = [8u8; 32];
-        let client = RecordingCalendarClient::new(CalendarProviderOutcome::Ambiguous);
-        let service = GoogleCalendarService::new(client);
-        let req = event_request(target, false, CalendarSelection::Primary);
-        let outcome = service
-            .create_event(&token(), &proof(target), &req)
-            .await
-            .expect("ambiguous outcome");
-        assert!(matches!(outcome, ProviderOutcome::Ambiguous(_)));
-    }
-
-    #[tokio::test]
-    async fn terminal_outcome_maps_to_terminal_failure() {
-        let target = [9u8; 32];
-        let client = RecordingCalendarClient::new(CalendarProviderOutcome::Terminal);
-        let service = GoogleCalendarService::new(client);
-        let req = event_request(target, false, CalendarSelection::Primary);
-        let outcome = service
-            .create_event(&token(), &proof(target), &req)
-            .await
-            .expect("terminal outcome");
-        assert!(matches!(outcome, ProviderOutcome::TerminalFailure(_)));
-    }
-
-    #[tokio::test]
-    async fn client_error_maps_to_retryable_failure() {
-        let target = [10u8; 32];
-        let service = GoogleCalendarService::new(FailingCalendarClient);
-        let req = event_request(target, false, CalendarSelection::Primary);
-        let outcome = service
-            .create_event(&token(), &proof(target), &req)
-            .await
-            .expect("retryable outcome");
-        assert!(matches!(outcome, ProviderOutcome::RetryableFailure(_)));
+        assert_eq!(service.client().create_call_count(), 1);
     }
 }

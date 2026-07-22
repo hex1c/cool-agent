@@ -22,14 +22,346 @@
 //!   write.  In both cases zero provider writes occur, so reminders and event
 //!   creations cannot duplicate on retry.
 
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 
-use domain::confirmation::ConfirmationConsumption;
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+
+use domain::authorization::AuthorizedWorkflowAction;
+use domain::confirmation::{
+    ConfirmationAction, ConfirmationConsumeRequest, ConfirmationConsumption,
+    ConfirmationIssueOutcome, ConfirmationIssueRequest, ConfirmationRecord,
+    MutationTargetFingerprint, PreviewDigest, TopicMessageReference,
+};
 use domain::idempotency::{IdempotencyKey, OperationKind, OperationTargetFingerprint};
+use domain::identity::{ConfirmationId, MessageId, ParticipantId};
 use domain::retry::RetryPolicy;
-use domain::workflow::WorkflowRevision;
+use domain::workflow::{WaitDeadline, Workflow, WorkflowRevision, WorkflowTimestamp};
 
 use crate::repositories::{ConsumeAndPrepareError, ConsumeAndPrepareRequest};
+
+const CALENDAR_TARGET_LABEL: &str = "calendar-event-v1";
+const MAX_TITLE_BYTES: usize = 256;
+const MAX_TIMEZONE_BYTES: usize = 64;
+const MAX_DESCRIPTION_BYTES: usize = 2_048;
+const MAX_CALENDAR_ID_BYTES: usize = 256;
+const MAX_EMAIL_BYTES: usize = 320;
+const MAX_ATTENDEES: usize = 200;
+const MAX_REMINDER_MINUTES: u16 = 40_320;
+
+/// Calendar chosen in the confirmation preview.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum CalendarTarget {
+    /// The workflow owner's primary calendar.
+    Primary,
+    /// An explicitly selected alternate calendar. Provider access is checked
+    /// with the workflow owner's token before event creation.
+    Alternate { calendar_id: String },
+}
+
+/// Workflow-owner reminder settings shown in the confirmation preview.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarReminders {
+    pub push_minutes: Option<u16>,
+    pub email_minutes: Option<u16>,
+}
+
+/// Canonical Calendar preview shown immediately before confirmation.
+///
+/// Every provider-relevant field is serialized into [`Self::digest`] and
+/// [`Self::mutation_target`]. The Google adapter can only build a request from
+/// this type, so attendees, invitation choice, calendar, timestamps, timezone,
+/// description, and reminders cannot change after confirmation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarPreview {
+    title: String,
+    start: String,
+    end: String,
+    timezone: String,
+    calendar: CalendarTarget,
+    description: Option<String>,
+    attendees: Vec<String>,
+    reminders: CalendarReminders,
+    send_invitations: bool,
+}
+
+impl CalendarPreview {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        title: String,
+        start: String,
+        end: String,
+        timezone: String,
+        calendar: CalendarTarget,
+        description: Option<String>,
+        mut attendees: Vec<String>,
+        reminders: CalendarReminders,
+        send_invitations: bool,
+    ) -> Result<Self, CalendarPreviewError> {
+        validate_bounded_text(&title, MAX_TITLE_BYTES, CalendarPreviewError::InvalidTitle)?;
+        validate_timezone(&timezone)?;
+        validate_calendar(&calendar)?;
+        if let Some(value) = description.as_deref()
+            && (value.len() > MAX_DESCRIPTION_BYTES || value.chars().any(char::is_control))
+        {
+            return Err(CalendarPreviewError::InvalidDescription);
+        }
+        let start_value = OffsetDateTime::parse(&start, &Rfc3339)
+            .map_err(|_| CalendarPreviewError::InvalidTimestamp)?;
+        let end_value = OffsetDateTime::parse(&end, &Rfc3339)
+            .map_err(|_| CalendarPreviewError::InvalidTimestamp)?;
+        if start_value >= end_value {
+            return Err(CalendarPreviewError::InvalidTimeRange);
+        }
+        if attendees.len() > MAX_ATTENDEES {
+            return Err(CalendarPreviewError::TooManyAttendees);
+        }
+        for attendee in &attendees {
+            validate_email(attendee)?;
+        }
+        attendees.sort_unstable();
+        let unique: HashSet<&str> = attendees.iter().map(String::as_str).collect();
+        if unique.len() != attendees.len() {
+            return Err(CalendarPreviewError::DuplicateAttendee);
+        }
+        validate_reminders(&reminders)?;
+        if send_invitations && attendees.is_empty() {
+            return Err(CalendarPreviewError::InvitationsWithoutAttendees);
+        }
+        Ok(Self {
+            title,
+            start,
+            end,
+            timezone,
+            calendar,
+            description,
+            attendees,
+            reminders,
+            send_invitations,
+        })
+    }
+
+    pub fn digest(&self) -> Result<PreviewDigest, CalendarPreviewError> {
+        let canonical =
+            serde_json::to_vec(self).map_err(|_| CalendarPreviewError::SerializationFailed)?;
+        let hash: [u8; 32] = Sha256::digest(canonical).into();
+        Ok(PreviewDigest::new(hash))
+    }
+
+    pub fn mutation_target(&self) -> Result<MutationTargetFingerprint, CalendarPreviewError> {
+        let digest = self.digest()?;
+        let combined = format!("{CALENDAR_TARGET_LABEL}:{}", hex::encode(digest.as_bytes()));
+        let hash: [u8; 32] = Sha256::digest(combined.as_bytes()).into();
+        Ok(MutationTargetFingerprint::new(hash))
+    }
+
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
+    pub fn start(&self) -> &str {
+        &self.start
+    }
+
+    pub fn end(&self) -> &str {
+        &self.end
+    }
+
+    pub fn timezone(&self) -> &str {
+        &self.timezone
+    }
+
+    pub const fn calendar(&self) -> &CalendarTarget {
+        &self.calendar
+    }
+
+    pub fn description(&self) -> Option<&str> {
+        self.description.as_deref()
+    }
+
+    pub fn attendees(&self) -> &[String] {
+        &self.attendees
+    }
+
+    pub const fn reminders(&self) -> &CalendarReminders {
+        &self.reminders
+    }
+
+    pub const fn send_invitations(&self) -> bool {
+        self.send_invitations
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CalendarPreviewError {
+    #[error("invalid calendar event title")]
+    InvalidTitle,
+    #[error("invalid calendar event timestamp")]
+    InvalidTimestamp,
+    #[error("calendar event end must be after start")]
+    InvalidTimeRange,
+    #[error("invalid calendar timezone")]
+    InvalidTimezone,
+    #[error("invalid alternate calendar id")]
+    InvalidCalendarId,
+    #[error("invalid calendar event description")]
+    InvalidDescription,
+    #[error("invalid attendee email")]
+    InvalidAttendee,
+    #[error("too many calendar attendees")]
+    TooManyAttendees,
+    #[error("duplicate calendar attendee")]
+    DuplicateAttendee,
+    #[error("invalid calendar reminder")]
+    InvalidReminder,
+    #[error("at least one calendar reminder is required")]
+    NoReminders,
+    #[error("send invitations requires at least one attendee")]
+    InvitationsWithoutAttendees,
+    #[error("calendar preview serialization failed")]
+    SerializationFailed,
+}
+
+fn validate_bounded_text(
+    value: &str,
+    maximum: usize,
+    error: CalendarPreviewError,
+) -> Result<(), CalendarPreviewError> {
+    if value.trim().is_empty() || value.len() > maximum || value.chars().any(char::is_control) {
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn validate_timezone(value: &str) -> Result<(), CalendarPreviewError> {
+    if value.trim().is_empty()
+        || value.len() > MAX_TIMEZONE_BYTES
+        || value
+            .bytes()
+            .any(|b| !(b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'-' | b'+')))
+    {
+        return Err(CalendarPreviewError::InvalidTimezone);
+    }
+    Ok(())
+}
+
+fn validate_calendar(value: &CalendarTarget) -> Result<(), CalendarPreviewError> {
+    if let CalendarTarget::Alternate { calendar_id } = value {
+        validate_bounded_text(
+            calendar_id,
+            MAX_CALENDAR_ID_BYTES,
+            CalendarPreviewError::InvalidCalendarId,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_email(value: &str) -> Result<(), CalendarPreviewError> {
+    if value.trim().is_empty()
+        || value.len() > MAX_EMAIL_BYTES
+        || value.chars().any(|c| c.is_ascii_control() || c == ' ')
+    {
+        return Err(CalendarPreviewError::InvalidAttendee);
+    }
+    let Some((local, domain)) = value.split_once('@') else {
+        return Err(CalendarPreviewError::InvalidAttendee);
+    };
+    if local.is_empty()
+        || domain.is_empty()
+        || local.contains('@')
+        || !domain
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-'))
+    {
+        return Err(CalendarPreviewError::InvalidAttendee);
+    }
+    Ok(())
+}
+
+fn validate_reminders(value: &CalendarReminders) -> Result<(), CalendarPreviewError> {
+    if value.push_minutes.is_none() && value.email_minutes.is_none() {
+        return Err(CalendarPreviewError::NoReminders);
+    }
+    if value
+        .push_minutes
+        .into_iter()
+        .chain(value.email_minutes)
+        .any(|minutes| minutes > MAX_REMINDER_MINUTES)
+    {
+        return Err(CalendarPreviewError::InvalidReminder);
+    }
+    Ok(())
+}
+
+/// Calendar-specific confirmation request. The action and mutation-target
+/// label are fixed by the service and cannot be selected by callers.
+pub struct IssueCalendarConfirmationRequest<'a> {
+    pub preview: &'a CalendarPreview,
+    pub confirmation_id: ConfirmationId,
+    pub actor: ParticipantId,
+    pub source_message: MessageId,
+    pub deadline: WaitDeadline,
+    pub timestamp: WorkflowTimestamp,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CalendarConfirmationError {
+    #[error(transparent)]
+    Preview(#[from] CalendarPreviewError),
+    #[error(transparent)]
+    Transition(#[from] domain::transition::TransitionError),
+    #[error(transparent)]
+    Confirmation(#[from] domain::confirmation::ConfirmationError),
+}
+
+/// Issues and consumes confirmations bound to the exact canonical Calendar
+/// preview. No external provider operation is performed here.
+pub struct CalendarConfirmationService;
+
+impl CalendarConfirmationService {
+    pub fn issue(
+        workflow: &Workflow,
+        request: IssueCalendarConfirmationRequest<'_>,
+    ) -> Result<ConfirmationIssueOutcome, CalendarConfirmationError> {
+        Ok(workflow.issue_confirmation(ConfirmationIssueRequest {
+            confirmation_id: request.confirmation_id,
+            expected_workflow_revision: workflow.revision(),
+            topic: workflow.topic(),
+            preview_digest: request.preview.digest()?,
+            mutation_target: request.preview.mutation_target()?,
+            action: ConfirmationAction::StartCalendarOrEmailAction,
+            deadline: request.deadline,
+            actor: request.actor,
+            source_message: request.source_message,
+            timestamp: request.timestamp,
+        })?)
+    }
+
+    pub fn consume(
+        confirmation: &ConfirmationRecord,
+        workflow: &Workflow,
+        authorization: &AuthorizedWorkflowAction,
+        preview: &CalendarPreview,
+        source: TopicMessageReference,
+        confirmed_at: WorkflowTimestamp,
+    ) -> Result<ConfirmationConsumption, CalendarConfirmationError> {
+        Ok(confirmation.consume(
+            workflow,
+            authorization,
+            ConfirmationConsumeRequest {
+                preview_digest: preview.digest()?,
+                mutation_target: preview.mutation_target()?,
+                source,
+                confirmed_at,
+            },
+        )?)
+    }
+}
 
 /// Rejected calendar operation binding.
 #[derive(Debug)]
