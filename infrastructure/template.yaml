@@ -82,6 +82,9 @@ Resources:
             ExpirationInDays: 7
       VersioningConfiguration:
         Status: Enabled
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+        - { Key: novus:component, Value: artifacts }
 
   ApplicationTable:
     Type: AWS::DynamoDB::Table
@@ -102,6 +105,9 @@ Resources:
           KeyType: HASH
         - AttributeName: SK
           KeyType: RANGE
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+        - { Key: novus:component, Value: application-table }
 
   BudgetTable:
     Type: AWS::DynamoDB::Table
@@ -122,6 +128,9 @@ Resources:
           KeyType: HASH
         - AttributeName: SK
           KeyType: RANGE
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+        - { Key: novus:component, Value: budget-table }
 
   EdgeApi:
     Type: AWS::Serverless::Api
@@ -135,6 +144,31 @@ Resources:
           LoggingLevel: INFO
 
   # ---------------------------------------------------------------------------
+  # IAM and security overlays (Task 39A). Nested stacks keep least-privilege
+  # roles and security controls reviewable in their own files.
+  # ---------------------------------------------------------------------------
+
+  FunctionsIamStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: policies/functions.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ApplicationTableArn: !GetAtt ApplicationTable.Arn
+        BudgetTableArn: !GetAtt BudgetTable.Arn
+        ArtifactBucketArn: !GetAtt ArtifactBucket.Arn
+        SecretsKeyArn: !GetAtt SecretsKey.Arn
+
+  SecurityStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: security.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        ArtifactBucketArn: !GetAtt ArtifactBucket.Arn
+        ArtifactBucketName: !Ref ArtifactBucket
+
+  # ---------------------------------------------------------------------------
   # Rust Lambda handlers
   # ---------------------------------------------------------------------------
 
@@ -146,6 +180,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-webhook"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.WebhookRoleArn
       MemorySize: 256
       Timeout: 10
       Events:
@@ -164,6 +199,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-oauth"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.OAuthRoleArn
       MemorySize: 256
       Timeout: 15
       Events:
@@ -188,6 +224,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-attachment-collection"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.AttachmentCollectionRoleArn
       MemorySize: 512
       Timeout: 60
 
@@ -199,6 +236,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-workflow-action"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.WorkflowActionRoleArn
       MemorySize: 256
       Timeout: 10
 
@@ -210,6 +248,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-pdf-render"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.PdfRenderRoleArn
       MemorySize: 1024
       Timeout: 60
 
@@ -221,6 +260,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-delivery"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.DeliveryRoleArn
       MemorySize: 1024
       Timeout: 120
 
@@ -232,6 +272,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-google-actions"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.GoogleActionsRoleArn
       MemorySize: 512
       Timeout: 60
 
@@ -243,6 +284,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-calendar-actions"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.CalendarActionsRoleArn
       MemorySize: 512
       Timeout: 60
 
@@ -254,6 +296,7 @@ Resources:
       FunctionName: !Sub "novus-${EnvironmentName}-email-actions"
       CodeUri: ..
       Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.EmailActionsRoleArn
       MemorySize: 512
       Timeout: 60
 
@@ -270,6 +313,7 @@ Resources:
       CodeUri: ..
       Runtime: nodejs22.x
       Handler: dist/src/index.handler
+      Role: !GetAtt FunctionsIamStack.Outputs.AgentHarnessRoleArn
       MemorySize: 2048
       Timeout: 180
 
@@ -283,6 +327,7 @@ Resources:
     Properties:
       Name: !Sub "novus-${EnvironmentName}-quotation"
       DefinitionUri: statemachines/quotation.asl.json
+      Role: !GetAtt FunctionsIamStack.Outputs.StateMachineExecutionRoleArn
       DefinitionSubstitutions:
         WebhookFunction: !GetAtt WebhookFunction.Arn
         AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn
@@ -297,6 +342,7 @@ Resources:
     Properties:
       Name: !Sub "novus-${EnvironmentName}-calendar"
       DefinitionUri: statemachines/calendar.asl.json
+      Role: !GetAtt FunctionsIamStack.Outputs.StateMachineExecutionRoleArn
       DefinitionSubstitutions:
         WebhookFunction: !GetAtt WebhookFunction.Arn
         AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn
@@ -309,6 +355,7 @@ Resources:
     Properties:
       Name: !Sub "novus-${EnvironmentName}-email"
       DefinitionUri: statemachines/email.asl.json
+      Role: !GetAtt FunctionsIamStack.Outputs.StateMachineExecutionRoleArn
       DefinitionSubstitutions:
         WebhookFunction: !GetAtt WebhookFunction.Arn
         AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn

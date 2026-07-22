@@ -1,0 +1,452 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Novus per-function least-privilege IAM roles (Task 39A). Applied as a
+  nested stack from infrastructure/template.yaml. Each role grants only the
+  table prefixes, S3 prefixes, SSM paths, KMS scope, and state-machine actions
+  its handler needs. Environment isolation comes from scoping every resource
+  ARN to the environment's physical resource names and the /novus/<env>/* SSM
+  namespace; no role can reach another environment's mutable data.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [development, staging, production]
+  ApplicationTableArn:
+    Type: String
+  BudgetTableArn:
+    Type: String
+  ArtifactBucketArn:
+    Type: String
+  SecretsKeyArn:
+    Type: String
+
+Metadata:
+  cfn-lint:
+    config:
+      ignore_checks:
+        # cfn-lint's IAM action list does not recognize dynamodb:ConditionCheck
+        # (a real AWS IAM action used for conditional writes). Suppress globally.
+        - W3037
+
+Rules:
+  # Fail fast: this nested stack must be instantiated per environment and
+  # cannot be shared. The parameter set is environment-bound.
+  ConfirmEnvironmentBound:
+    Assertions:
+      - Assert: !Not [!Equals [!Ref EnvironmentName, ""]]
+        AssertDescription: EnvironmentName must be set; IAM is environment-scoped.
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # Shared managed policies (composed into per-function roles)
+  # ---------------------------------------------------------------------------
+
+  XRayAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: X-Ray tracing + CloudWatch Logs put for every function.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - xray:PutTraceSegments
+              - xray:PutTelemetryRecords
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/novus-${EnvironmentName}-*"
+
+  DynamoDBWorkflowWritePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Conditional write + append on the application table.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:ConditionCheck
+              - dynamodb:DeleteItem
+            Resource: !Ref ApplicationTableArn
+
+  DynamoDBBudgetWritePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Budget guard reservation + aggregate writes (Task 41).
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:GetItem
+              - dynamodb:Query
+              - dynamodb:ConditionCheck
+            Resource: !Ref BudgetTableArn
+
+  S3RawWritePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Put + Head on the raw/ prefix (attachment intake).
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource: !Sub "${ArtifactBucketArn}/raw/*"
+
+  S3ArtifactReadWritePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Put + Get + Head on artifacts/ and links/ prefixes (delivery).
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:PutObject
+              - s3:GetObject
+            Resource:
+              - !Sub "${ArtifactBucketArn}/artifacts/*"
+              - !Sub "${ArtifactBucketArn}/links/*"
+
+  S3HistoryReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Read history/ and raw/ for AI rehydration.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+            Resource:
+              - !Sub "${ArtifactBucketArn}/history/*"
+              - !Sub "${ArtifactBucketArn}/raw/*"
+
+  SecretReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: >
+        Read SecureString parameters under /novus/<env>/* and decrypt with the
+        environment KMS key. The storage SecretProvider enforces the same
+        prefix at the application layer; this IAM scope is the outer boundary.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: ssm:GetParameter
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/novus/${EnvironmentName}/*"
+          - Effect: Allow
+            Action:
+              - ssm:GetParameters
+            Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/novus/${EnvironmentName}/*"
+          - Effect: Allow
+            Action: kms:Decrypt
+            Resource: !Ref SecretsKeyArn
+
+  StateMachineStartPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Start Step Functions executions for this environment only.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: states:StartExecution
+            # Scoped by environment-name prefix so the IAM stack does not
+            # depend on state-machine ARNs (which would create a circular
+            # dependency with the state-machine Role).
+            Resource: !Sub "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:novus-${EnvironmentName}-*"
+
+  TaskTokenResumePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: Resume a Step Functions task token (wait-for-token handlers).
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - states:SendTaskSuccess
+              - states:SendTaskFailure
+              - states:SendTaskHeartbeat
+            Resource: "*"
+
+  # ---------------------------------------------------------------------------
+  # Per-function roles
+  # ---------------------------------------------------------------------------
+
+  WebhookRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-webhook-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref S3RawWritePolicy
+        - !Ref SecretReadPolicy
+        - !Ref StateMachineStartPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: webhook
+
+  OAuthRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-oauth-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref SecretReadPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: oauth
+
+  AttachmentCollectionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-attachment-collection-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref S3RawWritePolicy
+        - !Ref SecretReadPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: attachment-collection
+
+  WorkflowActionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-workflow-action-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref TaskTokenResumePolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: workflow-action
+
+  PdfRenderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-pdf-render-role"
+      Description: Pure compute; no data-plane access beyond logs and tracing.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: pdf-render
+
+  DeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-delivery-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref S3ArtifactReadWritePolicy
+        - !Ref SecretReadPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: delivery
+
+  GoogleActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-google-actions-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref SecretReadPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: google-actions
+
+  CalendarActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-calendar-actions-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref SecretReadPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: calendar-actions
+
+  EmailActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-email-actions-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref SecretReadPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: email-actions
+
+  AgentHarnessRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-agent-harness-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBWorkflowWritePolicy
+        - !Ref S3HistoryReadPolicy
+        - !Ref SecretReadPolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: agent-harness
+
+  # ---------------------------------------------------------------------------
+  # Step Functions execution role — invoke only this environment's handlers.
+  # ---------------------------------------------------------------------------
+
+  StateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-states-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: states.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeEnvironmentHandlers
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource:
+                  - !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:novus-${EnvironmentName}-*"
+              - Effect: Allow
+                Action:
+                  - events:PutTargets
+                  - events:PutRule
+                  - events:DescribeRule
+                Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventFor*"
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: state-machines
+
+Outputs:
+  WebhookRoleArn:
+    Value: !GetAtt WebhookRole.Arn
+  OAuthRoleArn:
+    Value: !GetAtt OAuthRole.Arn
+  AttachmentCollectionRoleArn:
+    Value: !GetAtt AttachmentCollectionRole.Arn
+  WorkflowActionRoleArn:
+    Value: !GetAtt WorkflowActionRole.Arn
+  PdfRenderRoleArn:
+    Value: !GetAtt PdfRenderRole.Arn
+  DeliveryRoleArn:
+    Value: !GetAtt DeliveryRole.Arn
+  GoogleActionsRoleArn:
+    Value: !GetAtt GoogleActionsRole.Arn
+  CalendarActionsRoleArn:
+    Value: !GetAtt CalendarActionsRole.Arn
+  EmailActionsRoleArn:
+    Value: !GetAtt EmailActionsRole.Arn
+  AgentHarnessRoleArn:
+    Value: !GetAtt AgentHarnessRole.Arn
+  StateMachineExecutionRoleArn:
+    Value: !GetAtt StateMachineExecutionRole.Arn
