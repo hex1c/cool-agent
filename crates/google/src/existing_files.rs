@@ -235,6 +235,22 @@ impl ConfirmedMutationProof {
     }
 }
 
+impl ConfirmedMutationProof {
+    pub const fn new(
+        owner: ParticipantId,
+        mutation_target: MutationTargetFingerprint,
+        preview_digest: PreviewDigest,
+        workflow_revision: WorkflowRevision,
+    ) -> Self {
+        Self {
+            owner,
+            mutation_target,
+            preview_digest,
+            workflow_revision,
+        }
+    }
+}
+
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum ExistingFileError {
     #[error("invalid file resource id")]

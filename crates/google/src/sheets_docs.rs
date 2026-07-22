@@ -106,6 +106,22 @@ impl ConfirmedCreateProof {
     }
 }
 
+impl ConfirmedCreateProof {
+    pub const fn new(
+        owner: ParticipantId,
+        mutation_target: MutationTargetFingerprint,
+        preview_digest: PreviewDigest,
+        workflow_revision: WorkflowRevision,
+    ) -> Self {
+        Self {
+            owner,
+            mutation_target,
+            preview_digest,
+            workflow_revision,
+        }
+    }
+}
+
 #[allow(async_fn_in_trait)]
 pub trait GoogleCreateClient {
     type Error: Display + fmt::Debug;
