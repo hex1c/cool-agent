@@ -2,6 +2,8 @@
 target/
 *.pdb
 *.profraw
+# Local-only Cargo config (sccache wrapper); never committed so CI is unaffected.
+.cargo/config.toml
 
 # ── TypeScript / Node ───────────────────────────────────────────────────
 node_modules/
