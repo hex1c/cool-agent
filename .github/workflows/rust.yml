@@ -40,6 +40,15 @@ jobs:
           toolchain: 1.97.0
           components: rustfmt, clippy, llvm-tools-preview
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      # cargo-llvm-cov builds into a separate target dir (target/llvm-cov-target)
+      # with -Cinstrument-coverage + cfg(coverage), so its artifacts are
+      # incompatible with the normal target/ cache and cannot be reused.
+      # Cache that dir separately so the instrumented full rebuild only happens
+      # on the first run or when dependencies change.
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        with:
+          workspaces: ". -> target/llvm-cov-target"
+          shared-key: llvm-cov
       - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
         with:
           tool: cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7
