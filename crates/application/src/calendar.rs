@@ -35,6 +35,7 @@ use domain::confirmation::{
     ConfirmationIssueOutcome, ConfirmationIssueRequest, ConfirmationRecord,
     MutationTargetFingerprint, PreviewDigest, TopicMessageReference,
 };
+use domain::contracts::CalendarResult;
 use domain::idempotency::{IdempotencyKey, OperationKind, OperationTargetFingerprint};
 use domain::identity::{ConfirmationId, MessageId, ParticipantId};
 use domain::retry::RetryPolicy;
@@ -42,7 +43,7 @@ use domain::workflow::{WaitDeadline, Workflow, WorkflowRevision, WorkflowTimesta
 
 use crate::repositories::{ConsumeAndPrepareError, ConsumeAndPrepareRequest};
 
-const CALENDAR_TARGET_LABEL: &str = "calendar-event-v1";
+const CALENDAR_TARGET_LABEL: &str = "calendar-event-v2";
 const MAX_TITLE_BYTES: usize = 256;
 const MAX_TIMEZONE_BYTES: usize = 64;
 const MAX_DESCRIPTION_BYTES: usize = 2_048;
@@ -70,6 +71,34 @@ pub struct CalendarReminders {
     pub email_minutes: Option<u16>,
 }
 
+/// Defaults loaded from the workflow owner's Google Calendar profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnerCalendarDefaults {
+    timezone: String,
+    reminder_minutes: u16,
+}
+
+impl OwnerCalendarDefaults {
+    pub fn new(timezone: String, reminder_minutes: u16) -> Result<Self, CalendarPreviewError> {
+        validate_timezone(&timezone)?;
+        if reminder_minutes > MAX_REMINDER_MINUTES {
+            return Err(CalendarPreviewError::InvalidReminder);
+        }
+        Ok(Self {
+            timezone,
+            reminder_minutes,
+        })
+    }
+
+    pub fn timezone(&self) -> &str {
+        &self.timezone
+    }
+
+    pub const fn reminder_minutes(&self) -> u16 {
+        self.reminder_minutes
+    }
+}
+
 /// Canonical Calendar preview shown immediately before confirmation.
 ///
 /// Every provider-relevant field is serialized into [`Self::digest`] and
@@ -91,6 +120,48 @@ pub struct CalendarPreview {
 }
 
 impl CalendarPreview {
+    /// Resolve AI extraction into the confirmation preview. Missing timezone,
+    /// calendar, and reminder data use workflow-owner defaults; an explicit
+    /// calendar id selects an alternate calendar whose access is checked by
+    /// the Google adapter before insertion.
+    pub fn from_extraction(
+        result: &CalendarResult,
+        defaults: &OwnerCalendarDefaults,
+    ) -> Result<Self, CalendarPreviewError> {
+        let calendar = result
+            .calendar_id
+            .as_ref()
+            .map(|calendar_id| CalendarTarget::Alternate {
+                calendar_id: calendar_id.clone(),
+            })
+            .unwrap_or(CalendarTarget::Primary);
+        let reminders = result
+            .reminders
+            .as_ref()
+            .map(|value| CalendarReminders {
+                push_minutes: value.push_minutes,
+                email_minutes: value.email_minutes,
+            })
+            .unwrap_or(CalendarReminders {
+                push_minutes: Some(defaults.reminder_minutes()),
+                email_minutes: None,
+            });
+        Self::new(
+            result.title.clone(),
+            result.start.clone(),
+            result.end.clone(),
+            result
+                .timezone
+                .clone()
+                .unwrap_or_else(|| defaults.timezone().to_owned()),
+            calendar,
+            result.description.clone(),
+            result.attendees.clone(),
+            reminders,
+            result.send_invitations,
+        )
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         title: String,

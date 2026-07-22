@@ -11,7 +11,7 @@ import type { AiResponse } from "../src/contracts.js";
 const fixtureResponse = (() => {
   const fixturePath = resolve(
     import.meta.dirname,
-    "../../../tests/fixtures/contracts/v1.json",
+    "../../../tests/fixtures/contracts/v2.json",
   );
   const raw = readFileSync(fixturePath, "utf-8");
   const parsed = JSON.parse(raw) as { response: Record<string, unknown> };
@@ -19,7 +19,7 @@ const fixtureResponse = (() => {
 })();
 
 const request = {
-  contractVersion: "novus.ai.v1" as const,
+  contractVersion: "novus.ai.v2" as const,
   requestId: "request-001",
   workflowId: "workflow-001",
   operation: "extraction" as const,

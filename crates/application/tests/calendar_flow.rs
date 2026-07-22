@@ -32,7 +32,7 @@ use std::sync::{Arc, Mutex};
 use application::calendar::{
     CalendarConfirmationError, CalendarConfirmationService, CalendarFlowError,
     CalendarOperationService, CalendarPreview, CalendarPreviewError, CalendarReminders,
-    CalendarTarget, IssueCalendarConfirmationRequest,
+    CalendarTarget, IssueCalendarConfirmationRequest, OwnerCalendarDefaults,
 };
 use application::external_operation::{
     AttemptClaim, BackoffWait, BeginAttemptOutcome, CompletedAttempt, ExecutionError,
@@ -50,6 +50,7 @@ use domain::confirmation::{
     ConfirmationAction, ConfirmationConsumption, ConfirmationError, ConfirmationRecord,
     ConfirmationStatus, TopicMessageReference,
 };
+use domain::contracts::{CalendarReminderResult, CalendarResult};
 use domain::idempotency::IdempotencyKey;
 use domain::identity::{
     ChatId, ConfirmationId, MessageId, MessageThreadId, ParticipantId, TopicSessionId, WorkflowId,
@@ -417,6 +418,62 @@ fn consume_fresh(
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+#[test]
+fn extraction_defaults_to_owner_timezone_primary_calendar_and_reminder() {
+    let extracted = CalendarResult {
+        title: "Strategy sync".to_owned(),
+        start: "2025-02-03T10:00:00+05:30".to_owned(),
+        end: "2025-02-03T11:00:00+05:30".to_owned(),
+        timezone: None,
+        calendar_id: None,
+        description: None,
+        attendees: Vec::new(),
+        reminders: None,
+        send_invitations: false,
+    };
+    let defaults =
+        OwnerCalendarDefaults::new("Asia/Kolkata".to_owned(), 15).expect("owner defaults");
+
+    let preview =
+        CalendarPreview::from_extraction(&extracted, &defaults).expect("resolved preview");
+
+    assert_eq!(preview.timezone(), "Asia/Kolkata");
+    assert_eq!(preview.calendar(), &CalendarTarget::Primary);
+    assert_eq!(preview.reminders().push_minutes, Some(15));
+}
+
+#[test]
+fn extraction_preserves_explicit_calendar_description_and_reminders() {
+    let extracted = CalendarResult {
+        title: "Strategy sync".to_owned(),
+        start: "2025-02-03T10:00:00Z".to_owned(),
+        end: "2025-02-03T11:00:00Z".to_owned(),
+        timezone: Some("UTC".to_owned()),
+        calendar_id: Some("team-calendar".to_owned()),
+        description: Some("Quarterly planning".to_owned()),
+        attendees: vec!["alice@example.com".to_owned()],
+        reminders: Some(CalendarReminderResult {
+            push_minutes: None,
+            email_minutes: Some(30),
+        }),
+        send_invitations: true,
+    };
+    let defaults =
+        OwnerCalendarDefaults::new("Asia/Kolkata".to_owned(), 15).expect("owner defaults");
+
+    let preview =
+        CalendarPreview::from_extraction(&extracted, &defaults).expect("resolved preview");
+
+    assert_eq!(preview.timezone(), "UTC");
+    assert!(matches!(
+        preview.calendar(),
+        CalendarTarget::Alternate { calendar_id } if calendar_id == "team-calendar"
+    ));
+    assert_eq!(preview.description(), Some("Quarterly planning"));
+    assert_eq!(preview.reminders().email_minutes, Some(30));
+    assert!(preview.send_invitations());
+}
 
 #[test]
 fn calendar_preview_rejects_invalid_or_reversed_timestamps() {

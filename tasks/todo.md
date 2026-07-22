@@ -360,7 +360,7 @@ Step Functions, and the TypeScript Pi Lambda.
 - `config/schema/ai-response.schema.json`
 - `crates/domain/src/contracts.rs`
 - `services/agent-harness/src/contracts.ts`
-- `tests/fixtures/contracts/v1.json`
+- `tests/fixtures/contracts/v2.json`
 
 **Estimated scope:** Medium: 5 files
 

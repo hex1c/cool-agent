@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub const CONTRACT_VERSION: &str = "novus.ai.v1";
+pub const CONTRACT_VERSION: &str = "novus.ai.v2";
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -139,9 +139,20 @@ pub struct CalendarResult {
     pub title: String,
     pub start: String,
     pub end: String,
-    pub timezone: String,
+    pub timezone: Option<String>,
+    pub calendar_id: Option<String>,
+    pub description: Option<String>,
     pub attendees: Vec<String>,
+    pub reminders: Option<CalendarReminderResult>,
     pub send_invitations: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarReminderResult {
+    pub push_minutes: Option<u16>,
+    pub email_minutes: Option<u16>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -161,7 +172,7 @@ mod tests {
     #[test]
     fn request_fixture_round_trips_through_rust_types() {
         let fixture: Value =
-            serde_json::from_str(include_str!("../../../tests/fixtures/contracts/v1.json"))
+            serde_json::from_str(include_str!("../../../tests/fixtures/contracts/v2.json"))
                 .expect("contract fixture must be JSON");
         let request: AiRequest = serde_json::from_value(fixture["request"].clone())
             .expect("request fixture must match Rust contract");

@@ -1,6 +1,6 @@
 {
   "request": {
-    "contractVersion": "novus.ai.v1",
+    "contractVersion": "novus.ai.v2",
     "requestId": "req-001",
     "workflowId": "workflow-001",
     "operation": "extraction",
@@ -27,7 +27,7 @@
     }
   },
   "response": {
-    "contractVersion": "novus.ai.v1",
+    "contractVersion": "novus.ai.v2",
     "requestId": "req-001",
     "outcome": "success",
     "model": {
@@ -57,7 +57,20 @@
     },
     "quotation": null,
     "draft": null,
-    "calendar": null,
+    "calendar": {
+      "title": "Planning session",
+      "start": "2025-01-01T10:00:00+05:30",
+      "end": "2025-01-01T11:00:00+05:30",
+      "timezone": null,
+      "calendarId": null,
+      "description": "Quarterly planning",
+      "attendees": ["user@example.com"],
+      "reminders": {
+        "pushMinutes": 15,
+        "emailMinutes": null
+      },
+      "sendInvitations": false
+    },
     "error": null
   }
 }

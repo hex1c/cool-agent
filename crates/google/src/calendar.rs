@@ -15,8 +15,6 @@
 //!   caller must obtain a Google access token for that owner via
 //!   [`crate::auth::OwnerTokenSource`].
 
-use std::fmt::{self, Display};
-
 use application::calendar::{CalendarPreview, CalendarTarget};
 use application::external_operation::{
     ExternalResourceId, FailureCode, OperationFailure, ProviderOutcome, SanitizedSummary,
@@ -389,11 +387,14 @@ impl ConfirmedCalendarProof {
 /// `Created` → the event was created and a stable resource id returned.
 /// `Ambiguous` → outcome unknown (e.g. timeout before the response arrived).
 /// `Terminal` → the provider permanently rejected the request.
+/// `RetryableFailure` → the client proves the request was not accepted, so a
+/// retry cannot duplicate an event.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CalendarProviderOutcome {
     Created(ExternalResourceId),
     Ambiguous,
     Terminal,
+    RetryableFailure,
 }
 
 /// Provider access decision for an explicitly selected alternate calendar.
@@ -401,6 +402,7 @@ pub enum CalendarProviderOutcome {
 pub enum CalendarAccess {
     Writable,
     Denied,
+    RetryableFailure,
 }
 
 /// Google Calendar provider client boundary.
@@ -411,19 +413,21 @@ pub enum CalendarAccess {
 /// checked for writable access before insertion.
 #[allow(async_fn_in_trait)]
 pub trait GoogleCalendarClient {
-    type Error: Display + fmt::Debug;
-
     async fn calendar_access(
         &self,
         token: &GoogleAccessToken,
         calendar: &CalendarId,
-    ) -> Result<CalendarAccess, Self::Error>;
+    ) -> CalendarAccess;
 
+    /// Invoke event insertion and explicitly classify all transport failures.
+    /// Timeouts or disconnects after a request may have been accepted must be
+    /// `Ambiguous`; only failures known to occur before acceptance may be
+    /// `RetryableFailure`.
     async fn create_event(
         &self,
         token: &GoogleAccessToken,
         request: &CalendarEventRequest,
-    ) -> Result<CalendarProviderOutcome, Self::Error>;
+    ) -> CalendarProviderOutcome;
 }
 
 #[derive(Debug, Clone, thiserror::Error)]
@@ -531,15 +535,15 @@ impl<Client: GoogleCalendarClient> GoogleCalendarService<Client> {
 
         if let CalendarSelection::Alternate(calendar) = request.calendar() {
             match self.client.calendar_access(&token, calendar).await {
-                Ok(CalendarAccess::Writable) => {}
-                Ok(CalendarAccess::Denied) => {
+                CalendarAccess::Writable => {}
+                CalendarAccess::Denied => {
                     let f = failure(
                         "google_calendar_access_denied",
                         "workflow owner cannot write to selected calendar",
                     )?;
                     return Ok(ProviderOutcome::TerminalFailure(f));
                 }
-                Err(_) => {
+                CalendarAccess::RetryableFailure => {
                     let f = failure(
                         "google_calendar_access_failed",
                         "selected calendar access check failed",
@@ -550,27 +554,27 @@ impl<Client: GoogleCalendarClient> GoogleCalendarService<Client> {
         }
 
         match self.client.create_event(&token, request).await {
-            Ok(CalendarProviderOutcome::Created(id)) => Ok(ProviderOutcome::Accepted {
+            CalendarProviderOutcome::Created(id) => Ok(ProviderOutcome::Accepted {
                 resource_id: Some(id),
             }),
-            Ok(CalendarProviderOutcome::Ambiguous) => {
+            CalendarProviderOutcome::Ambiguous => {
                 let f = failure(
                     "google_calendar_ambiguous",
                     "google calendar outcome is ambiguous",
                 )?;
                 Ok(ProviderOutcome::Ambiguous(f))
             }
-            Ok(CalendarProviderOutcome::Terminal) => {
+            CalendarProviderOutcome::Terminal => {
                 let f = failure(
                     "google_calendar_terminal",
                     "google calendar permanently rejected the event",
                 )?;
                 Ok(ProviderOutcome::TerminalFailure(f))
             }
-            Err(_) => {
+            CalendarProviderOutcome::RetryableFailure => {
                 let f = failure(
                     "google_calendar_failed",
-                    "google calendar create attempt failed",
+                    "google calendar request was not accepted",
                 )?;
                 Ok(ProviderOutcome::RetryableFailure(f))
             }
@@ -582,13 +586,11 @@ impl<Client: GoogleCalendarClient> GoogleCalendarService<Client> {
 /// below where no provider invocation occurs.
 #[cfg(test)]
 impl GoogleCalendarClient for () {
-    type Error = std::convert::Infallible;
-
     async fn calendar_access(
         &self,
         _token: &GoogleAccessToken,
         _calendar: &CalendarId,
-    ) -> Result<CalendarAccess, Self::Error> {
+    ) -> CalendarAccess {
         unreachable!("unit validate tests never invoke the client")
     }
 
@@ -596,7 +598,7 @@ impl GoogleCalendarClient for () {
         &self,
         _token: &GoogleAccessToken,
         _request: &CalendarEventRequest,
-    ) -> Result<CalendarProviderOutcome, Self::Error> {
+    ) -> CalendarProviderOutcome {
         unreachable!("unit validate tests never invoke the client")
     }
 }

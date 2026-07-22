@@ -3,7 +3,7 @@ import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import requestSchema from "../../../config/schema/ai-request.schema.json" with { type: "json" };
 import responseSchema from "../../../config/schema/ai-response.schema.json" with { type: "json" };
 
-export const CONTRACT_VERSION = "novus.ai.v1" as const;
+export const CONTRACT_VERSION = "novus.ai.v2" as const;
 
 export type Operation =
   "extraction" | "quotation_calculation" | "draft" | "calendar";
@@ -43,6 +43,23 @@ export interface TypedError {
   retryable: boolean;
 }
 
+export interface CalendarReminderResult {
+  pushMinutes: number | null;
+  emailMinutes: number | null;
+}
+
+export interface CalendarResult {
+  title: string;
+  start: string;
+  end: string;
+  timezone: string | null;
+  calendarId: string | null;
+  description: string | null;
+  attendees: string[];
+  reminders: CalendarReminderResult | null;
+  sendInvitations: boolean;
+}
+
 export interface AiResponse {
   contractVersion: typeof CONTRACT_VERSION;
   requestId: string;
@@ -52,7 +69,7 @@ export interface AiResponse {
   extraction: Record<string, unknown> | null;
   quotation: Record<string, unknown> | null;
   draft: Record<string, unknown> | null;
-  calendar: Record<string, unknown> | null;
+  calendar: CalendarResult | null;
   error: TypedError | null;
 }
 

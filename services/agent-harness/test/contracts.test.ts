@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { parseRequest, parseResponse } from "../src/contracts.js";
 
 const fixturePath = fileURLToPath(
-  new URL("../../../tests/fixtures/contracts/v1.json", import.meta.url),
+  new URL("../../../tests/fixtures/contracts/v2.json", import.meta.url),
 );
 
 async function loadFixture(): Promise<unknown> {
@@ -22,13 +22,13 @@ describe("versioned AI contracts", () => {
       response: unknown;
     };
 
-    expect(parseRequest(fixture.request).contractVersion).toBe("novus.ai.v1");
+    expect(parseRequest(fixture.request).contractVersion).toBe("novus.ai.v2");
     expect(parseResponse(fixture.response).outcome).toBe("success");
   });
 
   it("rejects an unknown request property", () => {
     expect(() =>
-      parseRequest({ contractVersion: "novus.ai.v1", unexpected: true }),
+      parseRequest({ contractVersion: "novus.ai.v2", unexpected: true }),
     ).toThrow("Invalid request contract");
   });
 });

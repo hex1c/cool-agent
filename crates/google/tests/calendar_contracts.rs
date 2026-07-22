@@ -107,13 +107,13 @@ fn resource_id(value: &str) -> ExternalResourceId {
 enum AccessBehavior {
     Writable,
     Denied,
-    Error,
+    RetryableFailure,
 }
 
 #[derive(Debug, Clone)]
 enum CreateBehavior {
     Outcome(CalendarProviderOutcome),
-    Error,
+    RetryableFailure,
 }
 
 struct RecordingCalendarClient {
@@ -149,18 +149,16 @@ impl RecordingCalendarClient {
 }
 
 impl GoogleCalendarClient for RecordingCalendarClient {
-    type Error = String;
-
     async fn calendar_access(
         &self,
         _token: &GoogleAccessToken,
         _calendar: &google::calendar::CalendarId,
-    ) -> Result<CalendarAccess, Self::Error> {
+    ) -> CalendarAccess {
         *self.access_calls.lock().expect("access calls") += 1;
         match self.access_behavior {
-            AccessBehavior::Writable => Ok(CalendarAccess::Writable),
-            AccessBehavior::Denied => Ok(CalendarAccess::Denied),
-            AccessBehavior::Error => Err("access check failed".to_owned()),
+            AccessBehavior::Writable => CalendarAccess::Writable,
+            AccessBehavior::Denied => CalendarAccess::Denied,
+            AccessBehavior::RetryableFailure => CalendarAccess::RetryableFailure,
         }
     }
 
@@ -168,12 +166,12 @@ impl GoogleCalendarClient for RecordingCalendarClient {
         &self,
         _token: &GoogleAccessToken,
         request: &google::calendar::CalendarEventRequest,
-    ) -> Result<CalendarProviderOutcome, Self::Error> {
+    ) -> CalendarProviderOutcome {
         *self.create_calls.lock().expect("create calls") += 1;
         *self.last_send_invitations.lock().expect("invitations") = Some(request.send_invitations());
         match &self.create_behavior {
-            CreateBehavior::Outcome(outcome) => Ok(outcome.clone()),
-            CreateBehavior::Error => Err("create failed".to_owned()),
+            CreateBehavior::Outcome(outcome) => outcome.clone(),
+            CreateBehavior::RetryableFailure => CalendarProviderOutcome::RetryableFailure,
         }
     }
 }
@@ -374,7 +372,7 @@ async fn failed_access_check_is_retryable_without_event_write() {
     );
     let request = google::calendar::CalendarEventRequest::from_preview(&preview).expect("request");
     let service = GoogleCalendarService::new(RecordingCalendarClient::new(
-        AccessBehavior::Error,
+        AccessBehavior::RetryableFailure,
         CreateBehavior::Outcome(CalendarProviderOutcome::Created(resource_id(
             "must-not-create",
         ))),
@@ -429,7 +427,7 @@ async fn provider_outcomes_map_to_shared_executor_classifications() {
             CreateBehavior::Outcome(CalendarProviderOutcome::Terminal),
             "terminal",
         ),
-        (CreateBehavior::Error, "retryable"),
+        (CreateBehavior::RetryableFailure, "retryable"),
     ] {
         let preview = preview(false, CalendarTarget::Primary);
         let request =
