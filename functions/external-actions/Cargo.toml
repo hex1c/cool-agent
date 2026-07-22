@@ -1,0 +1,37 @@
+[package]
+name = "external-actions-functions"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[dependencies]
+lambda_runtime = "0.14"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "=0.11.0"
+hex = "0.4"
+tokio = { version = "1.43", features = ["macros", "rt-multi-thread"] }
+application = { path = "../../crates/application" }
+google = { path = "../../crates/google" }
+email = { path = "../../crates/email" }
+domain = { path = "../../crates/domain" }
+
+[dev-dependencies]
+google = { path = "../../crates/google", features = ["test-utils"] }
+email = { path = "../../crates/email", features = ["test-utils"] }
+domain = { path = "../../crates/domain", features = ["test-utils"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[lints.rust]
+unsafe_code = "deny"
+warnings = "deny"
+
+[lints.clippy]
+all = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+"indexing_slicing" = "deny"

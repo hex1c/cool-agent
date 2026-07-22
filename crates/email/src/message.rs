@@ -240,10 +240,7 @@ impl ConfirmedEmailProof {
     pub const fn workflow_revision(&self) -> WorkflowRevision {
         self.workflow_revision
     }
-}
 
-#[cfg(any(test, feature = "test-utils"))]
-impl ConfirmedEmailProof {
     #[allow(clippy::too_many_arguments)]
     pub const fn new(
         owner: ParticipantId,

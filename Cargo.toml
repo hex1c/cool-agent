@@ -9,6 +9,7 @@ members = [
   "crates/google",
   "crates/email",
   "crates/pdf",
+  "functions/external-actions",
 ]
 
 [workspace.package]

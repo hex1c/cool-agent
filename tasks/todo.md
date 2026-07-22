@@ -1133,14 +1133,14 @@ application services and expose versioned Step Functions events.
 
 **Acceptance criteria:**
 
-- [ ] Google/Calendar and email handlers contain no confirmation or retry business logic.
-- [ ] Handler results distinguish accepted, retryable, ambiguous, and terminal outcomes.
-- [ ] Local fixtures cover each result category without real credentials.
+- [x] Google/Calendar and email handlers contain no confirmation or retry business logic.
+- [x] Handler results distinguish accepted, retryable, ambiguous, and terminal outcomes.
+- [x] Local fixtures cover each result category without real credentials.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p external-actions-functions`
-- [ ] Build succeeds: `cargo build -p external-actions-functions`
+- [x] Tests pass: `cargo test -p external-actions-functions`
+- [x] Build succeeds: `cargo build -p external-actions-functions`
 
 **Dependencies:** Tasks 35-37
 
