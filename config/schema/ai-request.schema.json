@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://novus.invalid/schema/ai-request.v1.json",
+  "$id": "https://novus.invalid/schema/ai-request.v2.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -13,7 +13,7 @@
     "input"
   ],
   "properties": {
-    "contractVersion": { "const": "novus.ai.v1" },
+    "contractVersion": { "const": "novus.ai.v2" },
     "requestId": { "type": "string", "minLength": 1 },
     "workflowId": { "type": "string", "minLength": 1 },
     "operation": {

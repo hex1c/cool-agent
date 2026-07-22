@@ -360,7 +360,7 @@ Step Functions, and the TypeScript Pi Lambda.
 - `config/schema/ai-response.schema.json`
 - `crates/domain/src/contracts.rs`
 - `services/agent-harness/src/contracts.ts`
-- `tests/fixtures/contracts/v1.json`
+- `tests/fixtures/contracts/v2.json`
 
 **Estimated scope:** Medium: 5 files
 
@@ -1078,14 +1078,14 @@ create an owner-account event only after confirmation.
 
 **Acceptance criteria:**
 
-- [ ] Owner primary calendar/timezone defaults and accessible alternate calendars work.
-- [ ] Reminder settings, attendees, and send-invitations choice are extracted, clarified, previewed, and bound to confirmation.
-- [ ] Event and workflow-owner reminder fixtures cannot duplicate on retry; ambiguity enters manual review.
+- [x] Owner primary calendar/timezone defaults and accessible alternate calendars work.
+- [x] Reminder settings, attendees, and send-invitations choice are extracted, clarified, previewed, and bound to confirmation.
+- [x] Event and workflow-owner reminder fixtures cannot duplicate on retry; ambiguity enters manual review.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p google calendar`
-- [ ] Integration check: invitation-on and invitation-off fixtures each create one event.
+- [x] Tests pass: `cargo test -p google calendar`
+- [x] Integration check: invitation-on and invitation-off fixtures each create one event.
 
 **Dependencies:** Quotation Flow checkpoint, Tasks 17, 24, 30-32
 
