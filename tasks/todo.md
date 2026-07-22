@@ -1169,14 +1169,14 @@ timeouts, terminal failures, and workflow-specific branches.
 
 **Acceptance criteria:**
 
-- [ ] Wait/resume survives Lambda termination and uses durable task-token metadata.
-- [ ] Clarification/confirmation expiry and three-attempt failure paths are explicit.
-- [ ] Duplicate resume, cancellation race, and late callback cases are safe.
+- [x] Wait/resume survives Lambda termination and uses durable task-token metadata.
+- [x] Clarification/confirmation expiry and three-attempt failure paths are explicit.
+- [x] Duplicate resume, cancellation race, and late callback cases are safe.
 
 **Verification:**
 
-- [ ] Tests pass: Step Functions Local wait/resume/timeout/retry suite.
-- [ ] Validation passes: ASL definitions validate before SAM packaging.
+- [x] Tests pass: Step Functions Local wait/resume/timeout/retry suite.
+- [x] Validation passes: ASL definitions validate before SAM packaging.
 
 **Dependencies:** External Actions Proven checkpoint, Tasks 15-17, 31, 34A, 36-37A
 

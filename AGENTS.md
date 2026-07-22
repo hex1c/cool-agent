@@ -59,14 +59,24 @@ Keep the final response under 150 words unless more detail is explicitly request
 For Node.js and TypeScript projects:
 
 * Use pnpm exclusively; do not use npm or Yarn.
+* pnpm is available via corepack: `corepack pnpm <cmd>`. If `pnpm` is not
+  directly in PATH, prefix commands with `corepack`.
 * Install dependencies from the repository root with
   `pnpm install --frozen-lockfile`.
 * Run package-specific scripts with `pnpm --filter <package-name> <script>`.
+* Use `vitest run` (not bare `vitest`) in test scripts so CI and non-interactive
+  invocations do not hang in watch mode.
 
 For Rust projects:
 
 * Prefer the compact Rust/Cargo skill over raw `cargo check`, `cargo test`,
-  `cargo build`, and `cargo clippy`.
-* Do not inspect full Cargo logs unless the compact diagnostics are insufficient.
+  `cargo build`, and `cargo clippy`. Use the wrapper scripts at
+  `~/.pi/agent/skills/rust-compact/scripts/rust_check`, `rust_build`,
+  `rust_test`, `rust_nextest`, and `rust_clippy`.
+* Prefer `rust_nextest` over `rust_test` when `cargo-nextest` is installed —
+  it is faster and produces better failure output. It falls back to
+  `cargo test` automatically if nextest is absent.
+* Do not inspect full Cargo logs unless the compact diagnostics are
+  insufficient. Use `rust_log` to query specific failures.
 * Run the narrowest relevant test first instead of repeatedly running the full
   workspace test suite.
