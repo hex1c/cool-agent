@@ -2,18 +2,16 @@
   "name": "novus-telegram-operations-worker",
   "private": true,
   "type": "module",
-  "workspaces": [
-    "services/*"
-  ],
+  "packageManager": "pnpm@11.15.1",
   "engines": {
     "node": ">=22 <23"
   },
   "scripts": {
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "npm run lint --workspaces --if-present",
-    "test": "npm test --workspaces --if-present",
-    "build": "npm run build --workspaces --if-present"
+    "lint": "pnpm --recursive --if-present run lint",
+    "test": "pnpm --recursive --if-present run test",
+    "build": "pnpm --recursive --if-present run build"
   },
   "devDependencies": {
     "prettier": "3.9.5"

@@ -574,11 +574,11 @@ cargo test --workspace --all-features
 cargo build --workspace --all-features
 
 # TypeScript agent harness
-npm ci
-npm run format:check --workspace services/agent-harness
-npm run lint --workspace services/agent-harness
-npm test --workspace services/agent-harness -- --run
-npm run build --workspace services/agent-harness
+pnpm install --frozen-lockfile
+pnpm --filter @novus/agent-harness format:check
+pnpm --filter @novus/agent-harness lint
+pnpm --filter @novus/agent-harness test --run
+pnpm --filter @novus/agent-harness build
 
 # Infrastructure and local AWS sandbox
 sam validate --lint --template-file infrastructure/template.yaml
