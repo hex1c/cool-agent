@@ -460,6 +460,32 @@ fn calendar_preview_rejects_invalid_or_reversed_timestamps() {
 }
 
 #[test]
+fn calendar_preview_digest_is_stable_for_equivalent_attendee_order() {
+    let first = preview();
+    let second = CalendarPreview::new(
+        first.title().to_owned(),
+        first.start().to_owned(),
+        first.end().to_owned(),
+        first.timezone().to_owned(),
+        first.calendar().clone(),
+        first.description().map(str::to_owned),
+        vec!["bob@example.com".to_owned(), "alice@example.com".to_owned()],
+        first.reminders().clone(),
+        first.send_invitations(),
+    )
+    .expect("equivalent preview");
+
+    assert_eq!(
+        first.digest().expect("digest"),
+        second.digest().expect("digest")
+    );
+    assert_eq!(
+        first.mutation_target().expect("target"),
+        second.mutation_target().expect("target")
+    );
+}
+
+#[test]
 fn changed_invitation_choice_cannot_consume_confirmed_preview() {
     let (wf, original, record) = waiting_for_confirmation();
     let changed = CalendarPreview::new(

@@ -147,8 +147,10 @@ impl CalendarPreview {
     }
 
     pub fn digest(&self) -> Result<PreviewDigest, CalendarPreviewError> {
+        let value =
+            serde_json::to_value(self).map_err(|_| CalendarPreviewError::SerializationFailed)?;
         let canonical =
-            serde_json::to_vec(self).map_err(|_| CalendarPreviewError::SerializationFailed)?;
+            serde_json::to_vec(&value).map_err(|_| CalendarPreviewError::SerializationFailed)?;
         let hash: [u8; 32] = Sha256::digest(canonical).into();
         Ok(PreviewDigest::new(hash))
     }
