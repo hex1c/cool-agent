@@ -1,0 +1,112 @@
+{
+  "subagents": {
+    "agentOverrides": {
+      "scout": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "write",
+          "intercom",
+          "pi_lsp_diagnostics",
+          "lsp_goto_definition",
+          "lsp_find_references",
+          "lsp_symbols"
+        ]
+      },
+      "context-builder": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "write",
+          "web_search",
+          "intercom",
+          "pi_lsp_diagnostics",
+          "lsp_goto_definition",
+          "lsp_find_references",
+          "lsp_symbols"
+        ]
+      },
+      "delegate": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "edit",
+          "write",
+          "contact_supervisor",
+          "pi_lsp_diagnostics",
+          "lsp_goto_definition",
+          "lsp_find_references",
+          "lsp_symbols",
+          "lsp_prepare_rename",
+          "lsp_rename"
+        ]
+      },
+      "worker": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "edit",
+          "write",
+          "contact_supervisor",
+          "pi_lsp_diagnostics",
+          "lsp_goto_definition",
+          "lsp_find_references",
+          "lsp_symbols",
+          "lsp_prepare_rename",
+          "lsp_rename"
+        ]
+      },
+      "planner": {
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "agent_browser",
+          "contact_supervisor",
+          "pi_lsp_diagnostics",
+          "lsp_goto_definition",
+          "lsp_find_references",
+          "lsp_symbols"
+        ]
+      },
+      "reviewer": {
+        "thinking": "high"
+      },
+      "oracle": {
+        "thinking": "high",
+        "tools": [
+          "read",
+          "grep",
+          "find",
+          "ls",
+          "bash",
+          "contact_supervisor",
+          "pi_lsp_diagnostics",
+          "lsp_goto_definition",
+          "lsp_find_references",
+          "lsp_symbols"
+        ]
+      }
+    }
+  },
+  "packages": [
+    {
+      "source": "git:github.com/code-yeongyu/pi-lsp-client@359cfce586a65ab5940f73a5d36ad8bdfaf68a9a",
+      "extensions": []
+    }
+  ]
+}

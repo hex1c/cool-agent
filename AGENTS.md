@@ -22,6 +22,24 @@ Only communicate during execution when:
 * a blocking problem occurs,
 * an important decision cannot safely be inferred.
 
+## LSP-first code intelligence
+
+Agents and subagents with `pi-lsp-client` tools available must use them for
+source-code navigation whenever a language server is available. This reduces
+broad searches, full-file reads, and avoidable build output.
+
+* Start with `lsp_symbols` to map a file or find a workspace symbol.
+* Use `lsp_goto_definition` and `lsp_find_references` instead of repository-wide
+  text searches when following typed symbols.
+* Read only the exact implementation ranges returned by LSP; fall back to text
+  search or wider reads only when LSP is unavailable or insufficient.
+* Run targeted `pi_lsp_diagnostics` before expensive builds and after edits.
+  Prefer a file or narrow directory over the entire workspace.
+* For symbol renames, run `lsp_prepare_rename` before `lsp_rename`; do not use
+  text replacement for semantic renames.
+* Do not use LSP for prose, configuration-only searches, generated/vendor files,
+  or other cases where exact text search is more appropriate.
+
 When the task is complete, respond only with:
 
 CHANGED:
