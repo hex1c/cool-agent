@@ -125,7 +125,7 @@ the approved pinned OpenAI GPT-5.6 option on sanitized representative inputs.
 
 **Verification:**
 
-- [ ] Tests pass: `npm --prefix services/model-eval test -- --run`
+- [ ] Tests pass: `pnpm --dir services/model-eval test --run`
 - [ ] Human approves `docs/spikes/model-evaluation.md`.
 
 **Dependencies:** None; requires model credentials and approved thresholds.
@@ -267,15 +267,15 @@ format, lint, test, and build commands matching the PRD.
 
 **Verification:**
 
-- [x] Checks pass: `npm ci && npm run format:check --workspace services/agent-harness && npm run lint --workspace services/agent-harness`
-- [x] Tests/build pass: `npm test --workspace services/agent-harness -- --run && npm run build --workspace services/agent-harness`
+- [x] Checks pass: `pnpm install --frozen-lockfile && pnpm --filter @novus/agent-harness format:check && pnpm --filter @novus/agent-harness lint`
+- [x] Tests/build pass: `pnpm --filter @novus/agent-harness test --run && pnpm --filter @novus/agent-harness build`
 
 **Dependencies:** Feasibility checkpoint
 
 **Files likely touched:**
 
 - `package.json`
-- `package-lock.json`
+- `pnpm-lock.yaml`
 - `services/agent-harness/package.json`
 - `services/agent-harness/tsconfig.json`
 - `services/agent-harness/src/index.ts`
@@ -350,7 +350,7 @@ Step Functions, and the TypeScript Pi Lambda.
 **Verification:**
 
 - [x] Tests pass: `cargo test -p domain contracts`
-- [x] Tests pass: `npm test --workspace services/agent-harness -- --run contracts`
+- [x] Tests pass: `pnpm --filter @novus/agent-harness test --run contracts`
 
 **Dependencies:** Tasks 9-11A
 
@@ -847,8 +847,8 @@ no built-in mutation tools, and only narrowly scoped extraction tools.
 
 **Verification:**
 
-- [ ] Tests pass: `npm test --workspace services/agent-harness -- --run session-factory`
-- [ ] Build succeeds: `npm run build --workspace services/agent-harness`
+- [ ] Tests pass: `pnpm --filter @novus/agent-harness test --run session-factory`
+- [ ] Build succeeds: `pnpm --filter @novus/agent-harness build`
 
 **Dependencies:** Tasks 5, 10-12, 21
 
@@ -874,7 +874,7 @@ and round-trip sanitized ordered history and checkpoints through DynamoDB/S3.
 
 **Verification:**
 
-- [ ] Tests pass: `npm test --workspace services/agent-harness -- --run extraction history`
+- [ ] Tests pass: `pnpm --filter @novus/agent-harness test --run extraction history`
 - [ ] Integration check: two-invocation continuation fixture passes.
 
 **Dependencies:** Tasks 12, 21, 27-29
@@ -1322,7 +1322,7 @@ first and real development/staging providers where required.
 **Verification:**
 
 - [ ] Tests pass: `cargo test --workspace --all-features`
-- [ ] Tests pass: `npm test --workspace services/agent-harness -- --run`
+- [ ] Tests pass: `pnpm --filter @novus/agent-harness test --run`
 - [ ] Manual check: `docs/verification/prd-traceability.md` has no uncovered criterion.
 
 **Dependencies:** Infrastructure Ready checkpoint, Tasks 33-41

@@ -38,9 +38,17 @@ ISSUES:
 
 Keep the final response under 150 words unless more detail is explicitly requested.
 
+For Node.js and TypeScript projects:
+
+* Use pnpm exclusively; do not use npm or Yarn.
+* Install dependencies from the repository root with
+  `pnpm install --frozen-lockfile`.
+* Run package-specific scripts with `pnpm --filter <package-name> <script>`.
+
 For Rust projects:
 
-* Prefer the compact Rust/Cargo skill over raw `cargo check`, `cargo test`, `cargo build`, and `cargo clippy`.
+* Prefer the compact Rust/Cargo skill over raw `cargo check`, `cargo test`,
+  `cargo build`, and `cargo clippy`.
 * Do not inspect full Cargo logs unless the compact diagnostics are insufficient.
-* Run the narrowest relevant test first instead of repeatedly running the full workspace test suite.
-
+* Run the narrowest relevant test first instead of repeatedly running the full
+  workspace test suite.

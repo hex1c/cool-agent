@@ -1,0 +1,9 @@
+packages:
+  - services/*
+
+blockExoticSubdeps: true
+
+allowBuilds:
+  '@google/genai': false
+  esbuild: true
+  protobufjs: true
