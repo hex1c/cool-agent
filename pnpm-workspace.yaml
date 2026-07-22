@@ -4,6 +4,6 @@ packages:
 blockExoticSubdeps: true
 
 allowBuilds:
-  '@google/genai': false
+  "@google/genai": false
   esbuild: true
   protobufjs: true
