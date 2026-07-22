@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod calendar;
 pub mod drive;
 pub mod existing_files;
 pub mod mutations;

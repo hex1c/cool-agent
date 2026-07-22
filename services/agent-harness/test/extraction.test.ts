@@ -8,7 +8,7 @@ import { resolve } from "node:path";
 const fixtureResponse = (() => {
   const fixturePath = resolve(
     import.meta.dirname,
-    "../../../tests/fixtures/contracts/v1.json",
+    "../../../tests/fixtures/contracts/v2.json",
   );
   const raw = readFileSync(fixturePath, "utf-8");
   const parsed = JSON.parse(raw) as { response: Record<string, unknown> };
@@ -200,7 +200,10 @@ describe("extraction", () => {
         start: "2025-01-01T00:00:00Z",
         end: "2025-01-01T01:00:00Z",
         timezone: "UTC",
+        calendarId: null,
+        description: "Planning session",
         attendees: ["user@example.com"],
+        reminders: { pushMinutes: 10, emailMinutes: null },
         sendInvitations: false,
       },
     });

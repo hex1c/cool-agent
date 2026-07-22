@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://novus.invalid/schema/ai-response.v1.json",
+  "$id": "https://novus.invalid/schema/ai-response.v2.json",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -16,7 +16,7 @@
     "error"
   ],
   "properties": {
-    "contractVersion": { "const": "novus.ai.v1" },
+    "contractVersion": { "const": "novus.ai.v2" },
     "requestId": { "type": "string", "minLength": 1 },
     "outcome": {
       "enum": ["success", "invalid", "retryable_error", "terminal_error"]
@@ -121,17 +121,39 @@
         "start",
         "end",
         "timezone",
+        "calendarId",
+        "description",
         "attendees",
+        "reminders",
         "sendInvitations"
       ],
       "properties": {
         "title": { "type": "string", "minLength": 1 },
-        "start": { "type": "string", "minLength": 1 },
-        "end": { "type": "string", "minLength": 1 },
-        "timezone": { "type": "string", "minLength": 1 },
+        "start": { "type": "string", "format": "date-time" },
+        "end": { "type": "string", "format": "date-time" },
+        "timezone": { "type": ["string", "null"], "minLength": 1 },
+        "calendarId": { "type": ["string", "null"], "minLength": 1 },
+        "description": { "type": ["string", "null"] },
         "attendees": {
           "type": "array",
           "items": { "type": "string", "format": "email" }
+        },
+        "reminders": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["pushMinutes", "emailMinutes"],
+          "properties": {
+            "pushMinutes": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "maximum": 40320
+            },
+            "emailMinutes": {
+              "type": ["integer", "null"],
+              "minimum": 0,
+              "maximum": 40320
+            }
+          }
         },
         "sendInvitations": { "type": "boolean" }
       }

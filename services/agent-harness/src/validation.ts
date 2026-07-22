@@ -1,4 +1,9 @@
-import type { AiResponse, Operation, TypedError } from "./contracts.js";
+import type {
+  AiResponse,
+  CalendarResult,
+  Operation,
+  TypedError,
+} from "./contracts.js";
 
 /**
  * Result of business-rule validation. JSON Schema (parseResponse) already
@@ -180,24 +185,37 @@ function validateDraftBlock(
 }
 
 function validateCalendarBlock(
-  calendar: Record<string, unknown>,
+  calendar: CalendarResult,
   errors: string[],
 ): void {
-  const fields = ["title", "start", "end", "timezone"] as const;
-  for (const field of fields) {
-    const value = calendar[field];
-    if (typeof value !== "string" || value.length === 0) {
+  for (const field of ["title", "start", "end"] as const) {
+    if (calendar[field].length === 0) {
       errors.push(`calendar.${field} must be a non-empty string`);
     }
   }
 
-  const attendees = calendar["attendees"];
-  if (!Array.isArray(attendees)) {
-    errors.push("calendar.attendees must be an array");
+  if (calendar.timezone !== null && calendar.timezone.length === 0) {
+    errors.push("calendar.timezone must be null or a non-empty string");
   }
-
-  if (typeof calendar["sendInvitations"] !== "boolean") {
-    errors.push("calendar.sendInvitations must be a boolean");
+  if (calendar.calendarId !== null && calendar.calendarId.length === 0) {
+    errors.push("calendar.calendarId must be null or a non-empty string");
+  }
+  if (calendar.reminders !== null) {
+    const { pushMinutes, emailMinutes } = calendar.reminders;
+    if (pushMinutes === null && emailMinutes === null) {
+      errors.push("calendar.reminders must include at least one channel");
+    }
+    for (const [field, minutes] of [
+      ["pushMinutes", pushMinutes],
+      ["emailMinutes", emailMinutes],
+    ] as const) {
+      if (
+        minutes !== null &&
+        (!Number.isInteger(minutes) || minutes < 0 || minutes > 40_320)
+      ) {
+        errors.push(`calendar.reminders.${field} is invalid`);
+      }
+    }
   }
 }
 

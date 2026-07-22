@@ -4,6 +4,7 @@
 
 pub mod artifact_delivery;
 pub mod attachments;
+pub mod calendar;
 pub mod config;
 pub mod config_loader;
 pub mod existing_files;

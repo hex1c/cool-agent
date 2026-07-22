@@ -27,7 +27,7 @@ function makeHistory(
   }));
 
   return {
-    version: "novus.ai.v1",
+    version: "novus.ai.v2",
     workflowId: "workflow-001",
     entries,
     modelVersion,
