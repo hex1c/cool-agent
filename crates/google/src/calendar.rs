@@ -380,6 +380,22 @@ impl ConfirmedCalendarProof {
     }
 }
 
+impl ConfirmedCalendarProof {
+    pub const fn new(
+        owner: ParticipantId,
+        mutation_target: MutationTargetFingerprint,
+        preview_digest: PreviewDigest,
+        workflow_revision: WorkflowRevision,
+    ) -> Self {
+        Self {
+            owner,
+            mutation_target,
+            preview_digest,
+            workflow_revision,
+        }
+    }
+}
+
 // ── client + service ──────────────────────────────────────────────────
 
 /// Provider outcome reported by a calendar client to the service.

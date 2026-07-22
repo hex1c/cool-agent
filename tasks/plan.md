@@ -203,7 +203,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 - [x] Task 36: Implement the confirmed Calendar workflow
 - [x] Task 37: Implement the confirmed Hostinger email workflow
-- [ ] Task 37A: Package Google, Calendar, and email Lambda handlers
+- [x] Task 37A: Package Google, Calendar, and email Lambda handlers
 
 ### Checkpoint: External Actions Proven
 
