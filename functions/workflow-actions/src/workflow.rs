@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use application::quotation::{ConfirmedPdfProof, QuotationDeliveryError};
 use application::resumable_confirmation::{Preview, ResumableConfirmationService, ResumableError};
 use domain::authorization::{
-    AuthorizationError, LiveMembershipEvidence, MembershipStatus, authorize_participant,
+    authorize_participant, AuthorizationError, LiveMembershipEvidence, MembershipStatus,
 };
 use domain::confirmation::{
     ConfirmationAction, ConfirmationRecord, ConfirmationStatus, TopicMessageReference,

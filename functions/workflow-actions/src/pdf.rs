@@ -9,7 +9,7 @@
 //! uses no adapter, so failures are terminal (invalid document or layout),
 //! never retryable.
 
-use base64::{Engine, engine::general_purpose::STANDARD as BASE64};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
