@@ -1,0 +1,43 @@
+# SAM CLI configuration for the Novus Telegram Operations Worker (Task 39).
+#
+# Usage from the repository root:
+#   sam validate --lint --template-file infrastructure/template.yaml
+#   sam build       --template-file infrastructure/template.yaml
+#   sam deploy      --config-file infrastructure/samconfig.toml
+#
+# `default` is the development environment. Staging and production each get
+# their own environment section so isolated stacks cannot share mutable
+# resources (Task 39A tightens IAM and per-environment consistency).
+
+version = 0.1
+
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "novus-development"
+s3_bucket = ""        # Set per AWS account during first deploy (sam deploy --guided).
+s3_prefix = "novus-development"
+region = ""
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = false
+image_repositories = []
+parameter_overrides = "EnvironmentName=development"
+
+[staging]
+[staging.deploy]
+[staging.deploy.parameters]
+stack_name = "novus-staging"
+s3_prefix = "novus-staging"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "EnvironmentName=staging"
+
+[production]
+[production.deploy]
+[production.deploy.parameters]
+stack_name = "novus-production"
+s3_prefix = "novus-production"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "EnvironmentName=production"

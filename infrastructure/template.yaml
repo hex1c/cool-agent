@@ -1,0 +1,346 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Novus Telegram Operations Worker — core SAM resources and function packaging
+  (Task 39). Packages all Rust and TypeScript Lambda handlers with API Gateway,
+  DynamoDB, S3, Parameter Store/KMS, and Step Functions resources. Per-resource
+  IAM, encryption defaults, retention, and strict environment-isolation
+  controls are layered on by Task 39A.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Description: Logical environment name used to isolate physical resources.
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Default: development
+  ConfigSsmParameter:
+    Type: String
+    Description: >
+      SSM Parameter Store path holding the Base64-encoded deployment
+      configuration YAML (company + environment overlay merged by the config
+      loader, Task 11A). The parameter value is provisioned out-of-band; the
+      template only grants read access and never embeds secret material.
+    Default: /novus/development/config
+
+Globals:
+  Function:
+    Runtime: provided.al2023
+    Architectures:
+      - x86_64
+    MemorySize: 256
+    Timeout: 30
+    Tracing: Active
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref EnvironmentName
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+        CONFIG_SSM_PARAMETER: !Ref ConfigSsmParameter
+        APPLICATION_TABLE: !Ref ApplicationTable
+        BUDGET_TABLE: !Ref BudgetTable
+        ARTIFACT_BUCKET: !Ref ArtifactBucket
+
+Resources:
+  # ---------------------------------------------------------------------------
+
+  SecretsKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub "Novus ${EnvironmentName} secret encryption key"
+      EnableKeyRotation: true
+      KeySpec: SYMMETRIC_DEFAULT
+      KeyUsage: ENCRYPT_DECRYPT
+
+  SecretsKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub "alias/novus/${EnvironmentName}/secrets"
+      TargetKeyId: !Ref SecretsKey
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "novus-${EnvironmentName}-artifacts-${AWS::Region}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpirePresignedLinks
+            Prefix: links/
+            Status: Enabled
+            ExpirationInDays: 7
+      VersioningConfiguration:
+        Status: Enabled
+
+  ApplicationTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "novus-${EnvironmentName}-application"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  BudgetTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "novus-${EnvironmentName}-budget"
+      BillingMode: PAY_PER_REQUEST
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+
+  EdgeApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: !Ref EnvironmentName
+      TracingEnabled: true
+      MethodSettings:
+        - DataTraceEnabled: false
+          HttpMethod: "*"
+          ResourcePath: "/*"
+          LoggingLevel: INFO
+
+  # ---------------------------------------------------------------------------
+  # Rust Lambda handlers
+  # ---------------------------------------------------------------------------
+
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-webhook"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 256
+      Timeout: 10
+      Events:
+        TelegramWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref EdgeApi
+            Method: POST
+            Path: /webhook
+
+  OAuthFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-oauth"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 256
+      Timeout: 15
+      Events:
+        Authorize:
+          Type: Api
+          Properties:
+            RestApiId: !Ref EdgeApi
+            Method: GET
+            Path: /oauth/authorize/{participantId}
+        Callback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref EdgeApi
+            Method: GET
+            Path: /oauth/callback/{participantId}
+
+  AttachmentCollectionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-attachment-collection"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 512
+      Timeout: 60
+
+  WorkflowActionFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-workflow-action"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 256
+      Timeout: 10
+
+  PdfRenderFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-pdf-render"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 1024
+      Timeout: 60
+
+  DeliveryFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-delivery"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 1024
+      Timeout: 120
+
+  GoogleActionsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-google-actions"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 512
+      Timeout: 60
+
+  CalendarActionsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-calendar-actions"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 512
+      Timeout: 60
+
+  EmailActionsFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-email-actions"
+      CodeUri: ..
+      Handler: bootstrap
+      MemorySize: 512
+      Timeout: 60
+
+  # ---------------------------------------------------------------------------
+  # TypeScript Pi SDK Lambda handler
+  # ---------------------------------------------------------------------------
+
+  AgentHarnessFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-agent-harness"
+      CodeUri: ..
+      Runtime: nodejs22.x
+      Handler: dist/src/index.handler
+      MemorySize: 2048
+      Timeout: 180
+
+  # ---------------------------------------------------------------------------
+  # Step Functions workflows (Task 38). `${LogicalId}` placeholders in the ASL
+  # definitions are substituted with the corresponding function ARNs.
+  # ---------------------------------------------------------------------------
+
+  QuotationStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "novus-${EnvironmentName}-quotation"
+      DefinitionUri: statemachines/quotation.asl.json
+      DefinitionSubstitutions:
+        WebhookFunction: !GetAtt WebhookFunction.Arn
+        AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn
+        AgentHarnessFunction: !GetAtt AgentHarnessFunction.Arn
+        WorkflowActionFunction: !GetAtt WorkflowActionFunction.Arn
+        GoogleActionsFunction: !GetAtt GoogleActionsFunction.Arn
+        PdfRenderFunction: !GetAtt PdfRenderFunction.Arn
+        DeliveryFunction: !GetAtt DeliveryFunction.Arn
+
+  CalendarStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "novus-${EnvironmentName}-calendar"
+      DefinitionUri: statemachines/calendar.asl.json
+      DefinitionSubstitutions:
+        WebhookFunction: !GetAtt WebhookFunction.Arn
+        AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn
+        AgentHarnessFunction: !GetAtt AgentHarnessFunction.Arn
+        WorkflowActionFunction: !GetAtt WorkflowActionFunction.Arn
+        CalendarActionsFunction: !GetAtt CalendarActionsFunction.Arn
+
+  EmailStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: !Sub "novus-${EnvironmentName}-email"
+      DefinitionUri: statemachines/email.asl.json
+      DefinitionSubstitutions:
+        WebhookFunction: !GetAtt WebhookFunction.Arn
+        AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn
+        AgentHarnessFunction: !GetAtt AgentHarnessFunction.Arn
+        WorkflowActionFunction: !GetAtt WorkflowActionFunction.Arn
+        EmailActionsFunction: !GetAtt EmailActionsFunction.Arn
+
+Outputs:
+  EdgeApiUrl:
+    Description: Base URL for the Telegram webhook and OAuth callback API.
+    Value: !Sub "https://${EdgeApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}"
+  WebhookEndpoint:
+    Description: Telegram webhook endpoint.
+    Value: !Sub "https://${EdgeApi}.execute-api.${AWS::Region}.amazonaws.com/${EnvironmentName}/webhook"
+  ApplicationTableName:
+    Description: DynamoDB application table name.
+    Value: !Ref ApplicationTable
+  BudgetTableName:
+    Description: DynamoDB budget table name.
+    Value: !Ref BudgetTable
+  ArtifactBucketName:
+    Description: S3 artifact bucket name.
+    Value: !Ref ArtifactBucket
+  QuotationStateMachineArn:
+    Description: Quotation workflow state machine ARN.
+    Value: !Ref QuotationStateMachine
+  CalendarStateMachineArn:
+    Description: Calendar workflow state machine ARN.
+    Value: !Ref CalendarStateMachine
+  EmailStateMachineArn:
+    Description: Email workflow state machine ARN.
+    Value: !Ref EmailStateMachine
+  SecretsKeyId:
+    Description: KMS key id used for secret encryption.
+    Value: !Ref SecretsKey

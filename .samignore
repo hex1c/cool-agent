@@ -1,0 +1,20 @@
+# SAM build source-copy exclusions (Task 39). SAM copies the CodeUri
+# (repository root) into each function's build sandbox; this file keeps the
+# copy bounded by excluding build artifacts, caches, and local-only data.
+# Secret files are already gitignored and never copied.
+target/
+**/target/
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.aws-sam/
+.git/
+.pi/
+.pi-subagents/
+graphify-out/
+temp/
+infrastructure/local/data/
+*.sqlite
+*.sqlite3
+docs/sample-quotation.pdf

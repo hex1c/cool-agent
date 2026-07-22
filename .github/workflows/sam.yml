@@ -22,8 +22,11 @@ jobs:
             sam:
               - 'functions/**'
               - 'infrastructure/**'
+              - 'services/agent-harness/**'
               - 'tests/fixtures/sam/**'
               - 'Cargo.lock'
+              - 'Makefile'
+              - '.samignore'
               - '.github/workflows/sam.yml'
 
   sam:
@@ -46,6 +49,8 @@ jobs:
           tool: cargo-lambda@1.9.1
       - run: sam validate --lint --template-file infrastructure/spikes/rust-lambda.yaml
       - run: sam build --template-file infrastructure/spikes/rust-lambda.yaml
+      - name: Validate core SAM template (Task 39)
+        run: sam validate --lint --template-file infrastructure/template.yaml
       - name: Prove invalid SAM fixture fails validation
         shell: bash
         run: |
