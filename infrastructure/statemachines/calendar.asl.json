@@ -1,0 +1,368 @@
+{
+  "Comment": "Calendar workflow: intake → extraction → drafting → clarification → confirmation → Calendar event creation (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths.",
+  "StartAt": "ValidateIntake",
+  "TimeoutSeconds": 86400,
+  "States": {
+    "ValidateIntake": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${WebhookFunction}",
+        "Payload.$": "$"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "IntakeFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.intakeResult",
+      "Next": "CollectAttachments"
+    },
+    "CollectAttachments": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AttachmentCollectionFunction}",
+        "Payload.$": "$.intakeResult"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "AttachmentFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.attachmentResult",
+      "Next": "WaitForAttachmentDone"
+    },
+    "WaitForAttachmentDone": {
+      "Type": "Wait",
+      "SecondsPath": "$.attachmentResult.waitSeconds",
+      "Next": "CheckAttachmentStatus"
+    },
+    "CheckAttachmentStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.attachmentResult.status",
+          "StringEquals": "done",
+          "Next": "RunExtraction"
+        },
+        {
+          "Variable": "$.attachmentResult.status",
+          "StringEquals": "stopped",
+          "Next": "WorkflowStopped"
+        },
+        {
+          "Variable": "$.attachmentResult.status",
+          "StringEquals": "timed_out",
+          "Next": "AttachmentTimedOut"
+        }
+      ],
+      "Default": "AttachmentTimedOut"
+    },
+    "RunExtraction": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AgentHarnessFunction}",
+        "Payload.$": "$.attachmentResult"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ExtractionFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.extractionResult",
+      "Next": "CheckExtractionOutcome"
+    },
+    "CheckExtractionOutcome": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.extractionResult.outcome",
+          "StringEquals": "success",
+          "Next": "RunDrafting"
+        },
+        {
+          "Variable": "$.extractionResult.outcome",
+          "StringEquals": "invalid",
+          "Next": "ExtractionInvalid"
+        },
+        {
+          "Variable": "$.extractionResult.outcome",
+          "StringEquals": "retryable_error",
+          "Next": "RunExtraction"
+        },
+        {
+          "Variable": "$.extractionResult.outcome",
+          "StringEquals": "terminal_error",
+          "Next": "ExtractionFailed"
+        }
+      ],
+      "Default": "ExtractionFailed"
+    },
+    "RunDrafting": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${AgentHarnessFunction}",
+        "Payload.$": "$.extractionResult"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "DraftingFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.draftingResult",
+      "Next": "WaitForClarification"
+    },
+    "WaitForClarification": {
+      "Type": "Wait",
+      "SecondsPath": "$.draftingResult.clarificationWaitSeconds",
+      "Next": "CheckClarificationStatus"
+    },
+    "CheckClarificationStatus": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.clarification.status",
+          "StringEquals": "provided",
+          "Next": "RunDrafting"
+        },
+        {
+          "Variable": "$.clarification.status",
+          "StringEquals": "skipped",
+          "Next": "RequestConfirmation"
+        },
+        {
+          "Variable": "$.clarification.status",
+          "StringEquals": "timed_out",
+          "Next": "ClarificationTimedOut"
+        },
+        {
+          "Variable": "$.clarification.status",
+          "StringEquals": "cancelled",
+          "Next": "WorkflowStopped"
+        }
+      ],
+      "Default": "ClarificationTimedOut"
+    },
+    "RequestConfirmation": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${WorkflowActionFunction}",
+        "Payload": {
+          "schemaVersion": "novus.workflow-actions.v1",
+          "workflowId.$": "$.workflowId",
+          "taskToken.$": "$$.Task.Token",
+          "preview.$": "$.draftingResult.preview"
+        }
+      },
+      "TimeoutSecondsPath": "$.draftingResult.confirmationTimeoutSeconds",
+      "Catch": [
+        {
+          "ErrorEquals": ["States.Timeout"],
+          "Next": "ConfirmationTimedOut"
+        },
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "ConfirmationFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.confirmationResult",
+      "Next": "CheckConfirmationOutcome"
+    },
+    "CheckConfirmationOutcome": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.confirmationResult.outcome",
+          "StringEquals": "confirmed",
+          "Next": "CreateCalendarEvent"
+        },
+        {
+          "Variable": "$.confirmationResult.outcome",
+          "StringEquals": "corrected",
+          "Next": "RunDrafting"
+        },
+        {
+          "Variable": "$.confirmationResult.outcome",
+          "StringEquals": "cancelled",
+          "Next": "WorkflowStopped"
+        },
+        {
+          "Variable": "$.confirmationResult.outcome",
+          "StringEquals": "stale",
+          "Next": "ConfirmationStale"
+        }
+      ],
+      "Default": "ConfirmationFailed"
+    },
+    "CreateCalendarEvent": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${ExternalActionsFunction}",
+        "Payload.$": "$.confirmationResult"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 5,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": ["States.ALL"],
+          "Next": "CalendarActionFailed",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.calendarResult",
+      "Next": "CheckCalendarOutcome"
+    },
+    "CheckCalendarOutcome": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.calendarResult.outcome",
+          "StringEquals": "accepted",
+          "Next": "CompleteWorkflow"
+        },
+        {
+          "Variable": "$.calendarResult.outcome",
+          "StringEquals": "retryable_failure",
+          "Next": "CreateCalendarEvent"
+        },
+        {
+          "Variable": "$.calendarResult.outcome",
+          "StringEquals": "ambiguous",
+          "Next": "CalendarManualReview"
+        },
+        {
+          "Variable": "$.calendarResult.outcome",
+          "StringEquals": "terminal_failure",
+          "Next": "CalendarActionFailed"
+        }
+      ],
+      "Default": "CalendarActionFailed"
+    },
+    "CompleteWorkflow": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${WorkflowActionFunction}",
+        "Payload.$": "$.calendarResult"
+      },
+      "End": true
+    },
+    "IntakeFailed": {
+      "Type": "Fail",
+      "Cause": "Webhook intake failed after retries",
+      "Error": "IntakeFailed"
+    },
+    "AttachmentFailed": {
+      "Type": "Fail",
+      "Cause": "Attachment collection failed after retries",
+      "Error": "AttachmentFailed"
+    },
+    "AttachmentTimedOut": {
+      "Type": "Fail",
+      "Cause": "Attachment collection timed out",
+      "Error": "AttachmentTimedOut"
+    },
+    "ExtractionInvalid": {
+      "Type": "Fail",
+      "Cause": "AI extraction produced invalid output",
+      "Error": "ExtractionInvalid"
+    },
+    "ExtractionFailed": {
+      "Type": "Fail",
+      "Cause": "AI extraction failed after retries",
+      "Error": "ExtractionFailed"
+    },
+    "DraftingFailed": {
+      "Type": "Fail",
+      "Cause": "Calendar drafting failed after retries",
+      "Error": "DraftingFailed"
+    },
+    "ClarificationTimedOut": {
+      "Type": "Fail",
+      "Cause": "Clarification wait timed out",
+      "Error": "ClarificationTimedOut"
+    },
+    "ConfirmationTimedOut": {
+      "Type": "Fail",
+      "Cause": "Confirmation wait timed out",
+      "Error": "ConfirmationTimedOut"
+    },
+    "ConfirmationFailed": {
+      "Type": "Fail",
+      "Cause": "Confirmation processing failed",
+      "Error": "ConfirmationFailed"
+    },
+    "ConfirmationStale": {
+      "Type": "Fail",
+      "Cause": "Confirmation was stale or replayed",
+      "Error": "ConfirmationStale"
+    },
+    "CalendarActionFailed": {
+      "Type": "Fail",
+      "Cause": "Calendar event creation failed after retries",
+      "Error": "CalendarActionFailed"
+    },
+    "CalendarManualReview": {
+      "Type": "Fail",
+      "Cause": "Calendar outcome ambiguous; manual review required",
+      "Error": "CalendarManualReview"
+    },
+    "WorkflowStopped": {
+      "Type": "Fail",
+      "Cause": "Workflow stopped by participant",
+      "Error": "WorkflowStopped"
+    }
+  }
+}
