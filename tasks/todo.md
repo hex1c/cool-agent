@@ -1105,14 +1105,14 @@ with PDF attachment and seven-day S3 link through the shared mailbox.
 
 **Acceptance criteria:**
 
-- [ ] Recipient, CC/BCC, subject, body, attachments, and link expiry are bound to confirmation.
-- [ ] Provider outcome and stable message identifier are recorded without logging content/secrets.
-- [ ] Rejection retries follow policy; ambiguous acceptance enters manual review.
+- [x] Recipient, CC/BCC, subject, body, attachments, and link expiry are bound to confirmation.
+- [x] Provider outcome and stable message identifier are recorded without logging content/secrets.
+- [x] Rejection retries follow policy; ambiguous acceptance enters manual review.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p email --all-features`
-- [ ] Integration check: mock SMTP covers success, rejection, timeout, and ambiguity.
+- [x] Tests pass: `cargo test -p email --all-features`
+- [x] Integration check: mock SMTP covers success, rejection, timeout, and ambiguity.
 
 **Dependencies:** Tasks 7, 17, 21, 31, 34
 

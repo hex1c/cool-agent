@@ -73,6 +73,7 @@ pub struct AiResponse {
     pub quotation: Option<QuotationResult>,
     pub draft: Option<DraftResult>,
     pub calendar: Option<CalendarResult>,
+    pub email: Option<EmailResult>,
     pub error: Option<TypedError>,
 }
 
@@ -158,6 +159,19 @@ pub struct CalendarReminderResult {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 #[serde(rename_all = "camelCase")]
+pub struct EmailResult {
+    pub recipients: Vec<String>,
+    pub cc: Vec<String>,
+    pub bcc: Vec<String>,
+    pub subject: String,
+    pub body: String,
+    pub attach_quotation_pdf: bool,
+    pub include_seven_day_link: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct TypedError {
     pub code: String,
     pub message: String,
@@ -201,5 +215,14 @@ mod tests {
 
         assert!(request_validator.is_valid(&fixture["request"]));
         assert!(response_validator.is_valid(&fixture["response"]));
+
+        let email = response.email.expect("v2 fixture must carry email");
+        assert_eq!(email.recipients, vec!["customer@example.com"]);
+        assert!(email.cc.is_empty());
+        assert!(email.bcc.is_empty());
+        assert_eq!(email.subject, "Quotation follow-up");
+        assert_eq!(email.body, "Please find the quotation attached.");
+        assert!(email.attach_quotation_pdf);
+        assert!(email.include_seven_day_link);
     }
 }

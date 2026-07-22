@@ -27,6 +27,7 @@
     "quotation": { "$ref": "#/$defs/quotation" },
     "draft": { "$ref": "#/$defs/draft" },
     "calendar": { "$ref": "#/$defs/calendar" },
+    "email": { "$ref": "#/$defs/email" },
     "error": { "$ref": "#/$defs/error" }
   },
   "$defs": {
@@ -156,6 +157,38 @@
           }
         },
         "sendInvitations": { "type": "boolean" }
+      }
+    },
+    "email": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "recipients",
+        "cc",
+        "bcc",
+        "subject",
+        "body",
+        "attachQuotationPdf",
+        "includeSevenDayLink"
+      ],
+      "properties": {
+        "recipients": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "format": "email" }
+        },
+        "cc": {
+          "type": "array",
+          "items": { "type": "string", "format": "email" }
+        },
+        "bcc": {
+          "type": "array",
+          "items": { "type": "string", "format": "email" }
+        },
+        "subject": { "type": "string", "minLength": 1 },
+        "body": { "type": "string", "minLength": 1 },
+        "attachQuotationPdf": { "type": "boolean" },
+        "includeSevenDayLink": { "type": "boolean" }
       }
     },
     "error": {

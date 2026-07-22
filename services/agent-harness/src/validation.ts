@@ -1,6 +1,7 @@
 import type {
   AiResponse,
   CalendarResult,
+  EmailResult,
   Operation,
   TypedError,
 } from "./contracts.js";
@@ -35,9 +36,13 @@ const OPERATION_REQUIRED_FIELD = {
   quotation_calculation: "quotation",
   draft: "draft",
   calendar: "calendar",
+  email: "email",
 } as const satisfies Record<
   Operation,
-  keyof Pick<AiResponse, "extraction" | "quotation" | "draft" | "calendar">
+  keyof Pick<
+    AiResponse,
+    "extraction" | "quotation" | "draft" | "calendar" | "email"
+  >
 >;
 
 const CURRENCY_RE = /^[A-Z]{3}$/;
@@ -89,6 +94,10 @@ export function validateExtraction(
 
   if (response.calendar != null) {
     validateCalendarBlock(response.calendar, errors);
+  }
+
+  if (response.email != null) {
+    validateEmailBlock(response.email, errors);
   }
 
   if (response.error != null) {
@@ -216,6 +225,18 @@ function validateCalendarBlock(
         errors.push(`calendar.reminders.${field} is invalid`);
       }
     }
+  }
+}
+
+function validateEmailBlock(email: EmailResult, errors: string[]): void {
+  if (email.recipients.length === 0) {
+    errors.push("email.recipients must be a non-empty array");
+  }
+  if (email.subject.length === 0) {
+    errors.push("email.subject must be a non-empty string");
+  }
+  if (email.body.length === 0) {
+    errors.push("email.body must be a non-empty string");
   }
 }
 
