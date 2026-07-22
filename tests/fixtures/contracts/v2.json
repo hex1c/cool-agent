@@ -71,6 +71,15 @@
       },
       "sendInvitations": false
     },
+    "email": {
+      "recipients": ["customer@example.com"],
+      "cc": [],
+      "bcc": [],
+      "subject": "Quotation follow-up",
+      "body": "Please find the quotation attached.",
+      "attachQuotationPdf": true,
+      "includeSevenDayLink": true
+    },
     "error": null
   }
 }

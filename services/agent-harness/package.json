@@ -7,7 +7,7 @@
     "build": "node node_modules/typescript-compiler/bin/tsc -p tsconfig.json",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
     "lint": "eslint . --max-warnings 0",
-    "test": "vitest"
+    "test": "vitest run"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.80.10",

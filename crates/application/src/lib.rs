@@ -7,6 +7,7 @@ pub mod attachments;
 pub mod calendar;
 pub mod config;
 pub mod config_loader;
+pub mod email;
 pub mod existing_files;
 pub mod external_operation;
 pub mod normalization;
