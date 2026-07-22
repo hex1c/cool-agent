@@ -15,7 +15,11 @@ __pycache__/
 *.py[cod]
 
 # ── Pi ───────────────────────────────────────────────────────────────────
-.pi/
+.pi/*
+!.pi/settings.json
+!.pi/extensions/
+.pi/extensions/*
+!.pi/extensions/pi-lsp-client.ts
 .pi-subagents/
 
 # ── AWS SAM ──────────────────────────────────────────────────────────────
