@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "main": "dist/src/index.js",
+  "files": ["dist/src"],
   "scripts": {
     "build": "node node_modules/typescript-compiler/bin/tsc -p tsconfig.json",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
