@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Novus security and observability overlay (Task 39A): CloudWatch log retention,
+  S3 bucket policy enforcing TLS-in-transit and denying non-encrypted objects,
+  cost allocation tags, and per-environment budget alarms following ADR 0002.
+  Applied as a nested stack from infrastructure/template.yaml.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [development, staging, production]
+  ArtifactBucketArn:
+    Type: String
+  ArtifactBucketName:
+    Type: String
+
+Conditions:
+  IsProduction: !Equals [!Ref EnvironmentName, production]
+
+Resources:
+  # ---------------------------------------------------------------------------
+  # S3 bucket policy: deny non-TLS access and deny unencrypted object puts.
+  # ---------------------------------------------------------------------------
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucketName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !Ref ArtifactBucketArn
+              - !Sub "${ArtifactBucketArn}/*"
+            Condition:
+              Bool:
+                aws:SecureTransport: false
+          - Sid: DenyUnEncryptedObjectUploads
+            Effect: Deny
+            Principal: "*"
+            Action: s3:PutObject
+            Resource: !Sub "${ArtifactBucketArn}/*"
+            Condition:
+              StringNotEquals:
+                s3:x-amz-server-side-encryption: AES256
+
+  # ---------------------------------------------------------------------------
+  # CloudWatch log groups with environment-scoped retention. Retention is
+  # shorter in development to control cost and longer in production for
+  # investigation. No raw document content, OAuth tokens, or secrets are
+  # logged by the application; these groups receive only structured redacted
+  # labels.
+  # ---------------------------------------------------------------------------
+
+  WebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-webhook"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  OAuthLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-oauth"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  AttachmentCollectionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-attachment-collection"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  WorkflowActionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-workflow-action"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  PdfRenderLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-pdf-render"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  DeliveryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-delivery"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  GoogleActionsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-google-actions"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  CalendarActionsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-calendar-actions"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  EmailActionsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-email-actions"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  AgentHarnessLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-agent-harness"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  # ---------------------------------------------------------------------------
+  # Budget alarm (ADR 0002). AWS Budgets data can lag, so this is informational
+  # only; the authoritative budget guard is the application-level DynamoDB
+  # decision point (Task 41). The alarm covers the environment's cost
+  # allocation tag so it cannot sum another environment's spend.
+  # ---------------------------------------------------------------------------
+
+  EnvironmentBudgetAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-budget-warning"
+      AlarmDescription: !Sub "Warning when ${EnvironmentName} projected monthly cost approaches the cap (ADR 0002)."
+      Namespace: Novus/Budget
+      MetricName: ProjectedMonthlyCostMicroInr
+      Dimensions:
+        - Name: Environment
+          Value: !Ref EnvironmentName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 240000000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  EnvironmentBudgetSuspensionAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-budget-suspension"
+      AlarmDescription: !Sub "New-intake suspension threshold for ${EnvironmentName} (ADR 0002)."
+      Namespace: Novus/Budget
+      MetricName: ProjectedMonthlyCostMicroInr
+      Dimensions:
+        - Name: Environment
+          Value: !Ref EnvironmentName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 270000000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+Outputs:
+  BudgetWarningAlarmArn:
+    Value: !GetAtt EnvironmentBudgetAlarm.Arn
+  BudgetSuspensionAlarmArn:
+    Value: !GetAtt EnvironmentBudgetSuspensionAlarm.Arn
