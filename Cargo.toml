@@ -8,6 +8,7 @@ members = [
   "crates/oauth",
   "crates/google",
   "crates/pdf",
+  "tests/integration",
 ]
 
 [workspace.package]

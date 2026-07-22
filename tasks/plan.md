@@ -213,7 +213,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 
 ### Phase 7: Orchestration and Infrastructure
 
-- [ ] Task 38: Implement resumable Step Functions workflows
+- [x] Task 38: Implement resumable Step Functions workflows
 - [ ] Task 39: Define core SAM resources and function packaging
 - [ ] Task 39A: Add IAM and isolated environment controls
 - [ ] Task 40: Complete the local AWS sandbox
