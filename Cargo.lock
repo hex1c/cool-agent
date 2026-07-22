@@ -1040,6 +1040,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "email"
+version = "0.1.0"
+dependencies = [
+ "application",
+ "domain",
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "email_address"
 version = "0.2.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -113,6 +113,7 @@ const OPERATION_LABEL: Record<Operation, string> = {
   quotation_calculation: "quotation_calculation",
   draft: "draft",
   calendar: "calendar",
+  email: "email",
 };
 
 /**
@@ -136,6 +137,7 @@ function errorResponse(
     quotation: null,
     draft: null,
     calendar: null,
+    email: null,
     error: { code, message, retryable },
   };
 }
@@ -158,6 +160,7 @@ function successResponse(request: AiRequest, response: AiResponse): AiResponse {
     quotation: response.quotation,
     draft: response.draft,
     calendar: response.calendar,
+    email: response.email,
     error: response.error,
   };
 }
@@ -272,6 +275,7 @@ export function createHandler(
         quotation: response.quotation,
         draft: response.draft,
         calendar: response.calendar,
+        email: response.email,
         error: response.error,
       };
     }

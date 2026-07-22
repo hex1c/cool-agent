@@ -6,7 +6,7 @@ import responseSchema from "../../../config/schema/ai-response.schema.json" with
 export const CONTRACT_VERSION = "novus.ai.v2" as const;
 
 export type Operation =
-  "extraction" | "quotation_calculation" | "draft" | "calendar";
+  "extraction" | "quotation_calculation" | "draft" | "calendar" | "email";
 
 export interface ModelVersion {
   provider: string;
@@ -60,6 +60,16 @@ export interface CalendarResult {
   sendInvitations: boolean;
 }
 
+export interface EmailResult {
+  recipients: string[];
+  cc: string[];
+  bcc: string[];
+  subject: string;
+  body: string;
+  attachQuotationPdf: boolean;
+  includeSevenDayLink: boolean;
+}
+
 export interface AiResponse {
   contractVersion: typeof CONTRACT_VERSION;
   requestId: string;
@@ -70,6 +80,7 @@ export interface AiResponse {
   quotation: Record<string, unknown> | null;
   draft: Record<string, unknown> | null;
   calendar: CalendarResult | null;
+  email: EmailResult | null;
   error: TypedError | null;
 }
 
