@@ -1,0 +1,5 @@
+# Local-only Cargo config (gitignored).
+# Enables sccache as the rustc wrapper to speed up local rebuilds.
+# CI already caches via Swatinem/rust-cache, so sccache is not used there.
+[build]
+rustc-wrapper = "sccache"
