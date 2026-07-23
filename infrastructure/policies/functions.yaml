@@ -91,6 +91,7 @@ Resources:
               - dynamodb:GetItem
               - dynamodb:Query
               - dynamodb:ConditionCheck
+              - dynamodb:TransactWriteItems
             Resource: !Ref BudgetTableArn
 
   S3RawWritePolicy:
@@ -371,6 +372,26 @@ Resources:
         - Key: novus:component
           Value: email-actions
 
+  CostGuardRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "novus-${EnvironmentName}-cost-guard-role"
+      Description: Budget guard — only BudgetTable writes and logs.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Ref XRayAccessPolicy
+        - !Ref DynamoDBBudgetWritePolicy
+      Tags:
+        - Key: novus:environment
+          Value: !Ref EnvironmentName
+        - Key: novus:component
+          Value: cost-guard
+
   AgentHarnessRole:
     Type: AWS::IAM::Role
     Properties:
@@ -421,6 +442,17 @@ Resources:
                   - events:PutRule
                   - events:DescribeRule
                 Resource: !Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/StepFunctionsGetEventFor*"
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogDelivery
+                  - logs:GetLogDelivery
+                  - logs:UpdateLogDelivery
+                  - logs:DeleteLogDelivery
+                  - logs:ListLogDeliveries
+                  - logs:PutResourcePolicy
+                  - logs:DescribeResourcePolicies
+                  - logs:DescribeLogGroups
+                Resource: "*"
       Tags:
         - Key: novus:environment
           Value: !Ref EnvironmentName
@@ -448,5 +480,7 @@ Outputs:
     Value: !GetAtt EmailActionsRole.Arn
   AgentHarnessRoleArn:
     Value: !GetAtt AgentHarnessRole.Arn
+  CostGuardRoleArn:
+    Value: !GetAtt CostGuardRole.Arn
   StateMachineExecutionRoleArn:
     Value: !GetAtt StateMachineExecutionRole.Arn

@@ -14,8 +14,9 @@ async fn handler(
     event: LambdaEvent<ApiGatewayEvent>,
     verifier: &Arc<WebhookVerifier>,
 ) -> Result<ApiGatewayResponse, Error> {
-    let response = process_webhook(&event.payload, verifier.as_ref());
-    Ok(response.into_api_gateway())
+    let response = process_webhook(&event.payload, verifier.as_ref()).into_api_gateway();
+    emit_edge_metric("Webhook", response.status_code);
+    Ok(response)
 }
 
 #[tokio::main]
@@ -29,6 +30,36 @@ async fn main() -> Result<(), Error> {
         async move { handler(event, &verifier).await }
     }))
     .await
+}
+
+fn emit_edge_metric(kind: &'static str, status_code: u16) {
+    let environment = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "unknown".to_owned());
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
+    let error_count = u8::from(status_code >= 400);
+    let record = serde_json::json!({
+        "_aws": {
+            "Timestamp": timestamp,
+            "CloudWatchMetrics": [{
+                "Namespace": "Novus/Edge",
+                "Dimensions": [["Environment"]],
+                "Metrics": [
+                    {"Name": format!("{kind}RequestCount"), "Unit": "Count"},
+                    {"Name": format!("{kind}ErrorCount"), "Unit": "Count"}
+                ]
+            }]
+        },
+        "Environment": environment,
+        (format!("{kind}RequestCount")): 1,
+        (format!("{kind}ErrorCount")): error_count,
+        "event": "edge_request_outcome",
+        "handler": kind.to_ascii_lowercase(),
+        "outcome": if error_count == 0 { "accepted" } else { "rejected" }
+    });
+    if let Ok(line) = serde_json::to_string(&record) {
+        println!("{line}");
+    }
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────

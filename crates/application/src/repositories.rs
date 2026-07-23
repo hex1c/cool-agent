@@ -228,6 +228,11 @@ pub struct UsageSnapshot {
     pub settled_micro_inr: u64,
     pub reserved_micro_inr: u64,
     pub reconciled_micro_inr: u64,
+    pub reconciliation_observed_at: WorkflowTimestamp,
+    pub attribution_complete: bool,
+    pub pricing_version: StorageRecordId,
+    pub pricing_approval_id: StorageRecordId,
+    pub pricing_approved_at: WorkflowTimestamp,
     pub optimistic_version: u64,
 }
 
@@ -452,6 +457,15 @@ pub trait UsageRepository {
     type Error: Display;
 
     async fn load(&self, month: &InvoiceMonth) -> Result<Option<UsageSnapshot>, Self::Error>;
+    async fn initialize(
+        &self,
+        snapshot: &UsageSnapshot,
+    ) -> Result<ConditionalWriteOutcome, Self::Error>;
+    async fn load_reservation(
+        &self,
+        month: &InvoiceMonth,
+        reservation_id: &StorageRecordId,
+    ) -> Result<Option<UsageReservation>, Self::Error>;
     async fn reserve(
         &self,
         expected_version: u64,

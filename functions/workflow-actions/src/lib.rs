@@ -26,6 +26,7 @@
 //! All handlers log structured, redacted labels only — no OAuth tokens,
 //! presigned links, or raw document content.
 
+pub mod cost_guard;
 pub mod delivery;
 pub mod pdf;
 pub mod workflow;

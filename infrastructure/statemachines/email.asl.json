@@ -1,5 +1,5 @@
 {
-  "Comment": "Email workflow: intake → extraction → drafting → clarification → confirmation → SMTP send (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths. Ambiguous SMTP outcomes enter manual review, never automatic retry.",
+  "Comment": "Email workflow: intake \u2192 extraction \u2192 drafting \u2192 clarification \u2192 confirmation \u2192 SMTP send (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths. Ambiguous SMTP outcomes enter manual review, never automatic retry.",
   "StartAt": "ValidateIntake",
   "TimeoutSeconds": 86400,
   "States": {
@@ -12,7 +12,9 @@
       },
       "Retry": [
         {
-          "ErrorEquals": ["States.TaskFailed"],
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
           "IntervalSeconds": 2,
           "MaxAttempts": 3,
           "BackoffRate": 2.0
@@ -20,13 +22,15 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
+          "ErrorEquals": [
+            "States.ALL"
+          ],
           "Next": "IntakeFailed",
           "ResultPath": "$.error"
         }
       ],
       "ResultPath": "$.intakeResult",
-      "Next": "CollectAttachments"
+      "Next": "ReserveIntakeBudget"
     },
     "CollectAttachments": {
       "Type": "Task",
@@ -37,7 +41,9 @@
       },
       "Retry": [
         {
-          "ErrorEquals": ["States.TaskFailed"],
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
           "IntervalSeconds": 2,
           "MaxAttempts": 3,
           "BackoffRate": 2.0
@@ -45,7 +51,9 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
+          "ErrorEquals": [
+            "States.ALL"
+          ],
           "Next": "AttachmentFailed",
           "ResultPath": "$.error"
         }
@@ -64,7 +72,7 @@
         {
           "Variable": "$.attachmentResult.status",
           "StringEquals": "done",
-          "Next": "RunExtraction"
+          "Next": "ReserveAiBudget"
         },
         {
           "Variable": "$.attachmentResult.status",
@@ -88,7 +96,9 @@
       },
       "Retry": [
         {
-          "ErrorEquals": ["States.TaskFailed"],
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
           "IntervalSeconds": 5,
           "MaxAttempts": 3,
           "BackoffRate": 2.0
@@ -96,7 +106,9 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
+          "ErrorEquals": [
+            "States.ALL"
+          ],
           "Next": "ExtractionFailed",
           "ResultPath": "$.error"
         }
@@ -139,7 +151,9 @@
       },
       "Retry": [
         {
-          "ErrorEquals": ["States.TaskFailed"],
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
           "IntervalSeconds": 5,
           "MaxAttempts": 3,
           "BackoffRate": 2.0
@@ -147,7 +161,9 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
+          "ErrorEquals": [
+            "States.ALL"
+          ],
           "Next": "DraftingFailed",
           "ResultPath": "$.error"
         }
@@ -201,11 +217,15 @@
       "TimeoutSecondsPath": "$.draftingResult.confirmationTimeoutSeconds",
       "Catch": [
         {
-          "ErrorEquals": ["States.Timeout"],
+          "ErrorEquals": [
+            "States.Timeout"
+          ],
           "Next": "ConfirmationTimedOut"
         },
         {
-          "ErrorEquals": ["States.ALL"],
+          "ErrorEquals": [
+            "States.ALL"
+          ],
           "Next": "ConfirmationFailed",
           "ResultPath": "$.error"
         }
@@ -219,7 +239,7 @@
         {
           "Variable": "$.confirmationResult.outcome",
           "StringEquals": "confirmed",
-          "Next": "SendEmail"
+          "Next": "ReserveEmailBudget"
         },
         {
           "Variable": "$.confirmationResult.outcome",
@@ -248,7 +268,9 @@
       },
       "Retry": [
         {
-          "ErrorEquals": ["States.TaskFailed"],
+          "ErrorEquals": [
+            "States.TaskFailed"
+          ],
           "IntervalSeconds": 5,
           "MaxAttempts": 3,
           "BackoffRate": 2.0
@@ -256,7 +278,9 @@
       ],
       "Catch": [
         {
-          "ErrorEquals": ["States.ALL"],
+          "ErrorEquals": [
+            "States.ALL"
+          ],
           "Next": "EmailActionFailed",
           "ResultPath": "$.error"
         }
@@ -270,17 +294,17 @@
         {
           "Variable": "$.emailResult.outcome",
           "StringEquals": "accepted",
-          "Next": "CompleteWorkflow"
+          "Next": "SettleEmailBudget"
         },
         {
           "Variable": "$.emailResult.outcome",
           "StringEquals": "retryable_failure",
-          "Next": "SendEmail"
+          "Next": "ReserveEmailBudget"
         },
         {
           "Variable": "$.emailResult.outcome",
           "StringEquals": "ambiguous",
-          "Next": "EmailManualReview"
+          "Next": "MarkEmailManualReview"
         },
         {
           "Variable": "$.emailResult.outcome",
@@ -363,6 +387,221 @@
       "Type": "Fail",
       "Cause": "Workflow stopped by participant",
       "Error": "WorkflowStopped"
+    },
+    "ReserveIntakeBudget": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CostGuardIntakeFunction}",
+        "Payload": {
+          "action": "reserve",
+          "schemaVersion": "novus.workflow-actions.v1",
+          "workflowId.$": "$.workflowId",
+          "reservationId.$": "States.Format('{}-intake', $.workflowId)"
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "BudgetGuardUnavailable",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.intakeBudgetResult",
+      "Next": "CheckIntakeBudget"
+    },
+    "CheckIntakeBudget": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.intakeBudgetResult.Payload.authorized",
+          "BooleanEquals": true,
+          "Next": "CollectAttachments"
+        }
+      ],
+      "Default": "BudgetDenied"
+    },
+    "ReserveAiBudget": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CostGuardAiFunction}",
+        "Payload": {
+          "action": "reserve",
+          "schemaVersion": "novus.workflow-actions.v1",
+          "workflowId.$": "$.workflowId",
+          "reservationId.$": "States.Format('{}-ai', $.workflowId)"
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "BudgetGuardUnavailable",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.aiBudgetResult",
+      "Next": "CheckAiBudget"
+    },
+    "CheckAiBudget": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.aiBudgetResult.Payload.authorized",
+          "BooleanEquals": true,
+          "Next": "RunExtraction"
+        }
+      ],
+      "Default": "BudgetDenied"
+    },
+    "ReserveEmailBudget": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CostGuardExternalFunction}",
+        "Payload": {
+          "action": "reserve",
+          "schemaVersion": "novus.workflow-actions.v1",
+          "workflowId.$": "$.workflowId",
+          "reservationId.$": "States.Format('{}-email', $.workflowId)"
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "BudgetGuardUnavailable",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.externalBudgetResult",
+      "Next": "CheckEmailBudget"
+    },
+    "CheckEmailBudget": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.externalBudgetResult.Payload.authorized",
+          "BooleanEquals": true,
+          "Next": "SendEmail"
+        }
+      ],
+      "Default": "BudgetDenied"
+    },
+    "SettleEmailBudget": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CostGuardFunction}",
+        "Payload": {
+          "action": "settle",
+          "schemaVersion": "novus.workflow-actions.v1",
+          "workflowId.$": "$.workflowId",
+          "invoiceMonth.$": "$.externalBudgetResult.Payload.invoiceMonth",
+          "reservationId.$": "States.Format('{}-email', $.workflowId)"
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "BudgetGuardUnavailable",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.emailSettlementResult",
+      "Next": "SettleAiBudget"
+    },
+    "MarkEmailManualReview": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CostGuardFunction}",
+        "Payload": {
+          "action": "manual_review",
+          "schemaVersion": "novus.workflow-actions.v1",
+          "workflowId.$": "$.workflowId",
+          "invoiceMonth.$": "$.externalBudgetResult.Payload.invoiceMonth",
+          "reservationId.$": "States.Format('{}-email', $.workflowId)"
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "BudgetGuardUnavailable",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.emailManualReviewResult",
+      "Next": "EmailManualReview"
+    },
+    "BudgetDenied": {
+      "Type": "Fail",
+      "Error": "BudgetDenied",
+      "Cause": "Environment budget guard denied the operation"
+    },
+    "BudgetGuardUnavailable": {
+      "Type": "Fail",
+      "Error": "BudgetGuardUnavailable",
+      "Cause": "Environment budget guard was unavailable; failed closed"
+    },
+    "SettleAiBudget": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CostGuardFunction}",
+        "Payload": {
+          "action": "settle",
+          "schemaVersion": "novus.workflow-actions.v1",
+          "workflowId.$": "$.workflowId",
+          "invoiceMonth.$": "$.aiBudgetResult.Payload.invoiceMonth",
+          "reservationId.$": "States.Format('{}-ai', $.workflowId)"
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "BudgetGuardUnavailable",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.aiSettlementResult",
+      "Next": "SettleIntakeBudget"
+    },
+    "SettleIntakeBudget": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "FunctionName": "${CostGuardFunction}",
+        "Payload": {
+          "action": "settle",
+          "schemaVersion": "novus.workflow-actions.v1",
+          "workflowId.$": "$.workflowId",
+          "invoiceMonth.$": "$.intakeBudgetResult.Payload.invoiceMonth",
+          "reservationId.$": "States.Format('{}-intake', $.workflowId)"
+        }
+      },
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "BudgetGuardUnavailable",
+          "ResultPath": "$.error"
+        }
+      ],
+      "ResultPath": "$.intakeSettlementResult",
+      "Next": "CompleteWorkflow"
     }
   }
 }

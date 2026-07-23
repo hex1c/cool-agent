@@ -88,6 +88,38 @@ Resources:
       Tags:
         - { Key: novus:environment, Value: !Ref EnvironmentName }
 
+  CostGuardIntakeLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-cost-guard-intake"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  CostGuardAiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-cost-guard-ai"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  CostGuardExternalLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-cost-guard-external"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
+  CostGuardLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/novus-${EnvironmentName}-cost-guard"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
+
   PdfRenderLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -135,54 +167,3 @@ Resources:
       RetentionInDays: !If [IsProduction, 30, 7]
       Tags:
         - { Key: novus:environment, Value: !Ref EnvironmentName }
-
-  # ---------------------------------------------------------------------------
-  # Budget alarm (ADR 0002). AWS Budgets data can lag, so this is informational
-  # only; the authoritative budget guard is the application-level DynamoDB
-  # decision point (Task 41). The alarm covers the environment's cost
-  # allocation tag so it cannot sum another environment's spend.
-  # ---------------------------------------------------------------------------
-
-  EnvironmentBudgetAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "novus-${EnvironmentName}-budget-warning"
-      AlarmDescription: !Sub "Warning when ${EnvironmentName} projected monthly cost approaches the cap (ADR 0002)."
-      Namespace: Novus/Budget
-      MetricName: ProjectedMonthlyCostMicroInr
-      Dimensions:
-        - Name: Environment
-          Value: !Ref EnvironmentName
-      Statistic: Maximum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 240000000
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-      Tags:
-        - { Key: novus:environment, Value: !Ref EnvironmentName }
-
-  EnvironmentBudgetSuspensionAlarm:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-      AlarmName: !Sub "novus-${EnvironmentName}-budget-suspension"
-      AlarmDescription: !Sub "New-intake suspension threshold for ${EnvironmentName} (ADR 0002)."
-      Namespace: Novus/Budget
-      MetricName: ProjectedMonthlyCostMicroInr
-      Dimensions:
-        - Name: Environment
-          Value: !Ref EnvironmentName
-      Statistic: Maximum
-      Period: 300
-      EvaluationPeriods: 1
-      Threshold: 270000000
-      ComparisonOperator: GreaterThanOrEqualToThreshold
-      TreatMissingData: notBreaching
-      Tags:
-        - { Key: novus:environment, Value: !Ref EnvironmentName }
-
-Outputs:
-  BudgetWarningAlarmArn:
-    Value: !GetAtt EnvironmentBudgetAlarm.Arn
-  BudgetSuspensionAlarmArn:
-    Value: !GetAtt EnvironmentBudgetSuspensionAlarm.Arn

@@ -23,6 +23,10 @@ include infrastructure/build-agent.mk
 	build-GoogleActionsFunction \
 	build-CalendarActionsFunction \
 	build-EmailActionsFunction \
+	build-CostGuardIntakeFunction \
+	build-CostGuardAiFunction \
+	build-CostGuardExternalFunction \
+	build-CostGuardFunction \
 	build-AgentHarnessFunction
 
 # --- Rust handlers (provided.al2023, x86_64) -------------------------------
@@ -62,6 +66,10 @@ build-CalendarActionsFunction:
 # Confirmed Hostinger SMTP send (512 MB, 60 s).
 build-EmailActionsFunction:
 	$(call cargo-lambda-bin,email,functions/external-actions)
+
+# Environment-bound usage reservations and reconciliation (256 MB, 10 s).
+build-CostGuardIntakeFunction build-CostGuardAiFunction build-CostGuardExternalFunction build-CostGuardFunction:
+	$(call cargo-lambda-bin,cost_guard,functions/workflow-actions)
 
 # --- TypeScript handler (nodejs22.x) ----------------------------------------
 

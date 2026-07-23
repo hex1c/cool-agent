@@ -15,6 +15,8 @@ STEPFUNCTIONS_ENDPOINT="${STEPFUNCTIONS_ENDPOINT:-http://127.0.0.1:8083}"
 APPLICATION_TABLE="${APPLICATION_TABLE:-novus-development-application}"
 BUDGET_TABLE="${BUDGET_TABLE:-novus-development-budget}"
 ARTIFACT_BUCKET="${ARTIFACT_BUCKET:-novus-development-artifacts-local}"
+INVOICE_MONTH="${INVOICE_MONTH:-$(date -u +%Y-%m)}"
+RECONCILIATION_OBSERVED_AT="${RECONCILIATION_OBSERVED_AT:-$(date -u +%s)}"
 
 wait_for_localstack() {
   attempts=0
@@ -81,6 +83,22 @@ aws --endpoint-url "$DYNAMODB_ENDPOINT" dynamodb put-item \
   --table-name "$APPLICATION_TABLE" \
   --item '{"pk":{"S":"SANDBOX#SEED"},"sk":{"S":"METADATA"},"schemaVersion":{"S":"novus.local.seed.v1"},"sanitized":{"BOOL":true}}' \
   >/dev/null
+
+cat > /tmp/budget-aggregate.json <<EOF
+{"pk":{"S":"MONTH#$INVOICE_MONTH"},"sk":{"S":"AGGREGATE"},"entity":{"S":"budget_aggregate"},"invoice_month":{"S":"$INVOICE_MONTH"},"settled_micro_inr":{"N":"0"},"reserved_micro_inr":{"N":"0"},"reconciled_micro_inr":{"N":"0"},"reconciliation_observed_at":{"N":"$RECONCILIATION_OBSERVED_AT"},"attribution_complete":{"BOOL":true},"pricing_version":{"S":"task41-2026-07-23"},"pricing_approval_id":{"S":"task41-2026-07-23"},"pricing_approved_at":{"N":"1784764800"},"optimistic_version":{"N":"0"}}
+EOF
+if ! aws --endpoint-url "$DYNAMODB_ENDPOINT" dynamodb put-item \
+  --table-name "$BUDGET_TABLE" \
+  --item file:///tmp/budget-aggregate.json \
+  --condition-expression 'attribute_not_exists(pk)' >/dev/null 2>&1; then
+  # Preserve existing counters on repeated initialization.
+  aws --endpoint-url "$DYNAMODB_ENDPOINT" dynamodb get-item \
+    --table-name "$BUDGET_TABLE" \
+    --key "{\"pk\":{\"S\":\"MONTH#$INVOICE_MONTH\"},\"sk\":{\"S\":\"AGGREGATE\"}}" \
+    --consistent-read \
+    --query 'Item.entity.S' \
+    --output text | grep -qx budget_aggregate
+fi
 
 if ! aws --endpoint-url "$LOCALSTACK_ENDPOINT" s3api head-bucket \
   --bucket "$ARTIFACT_BUCKET" >/dev/null 2>&1; then
