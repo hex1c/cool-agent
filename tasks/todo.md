@@ -1344,13 +1344,13 @@ configuration, tests, SAM build, approval, and rollback readiness.
 
 **Acceptance criteria:**
 
-- [ ] Deployment fails on any required check, skipped critical test, insufficient budget margin, missing asset, or missing approval.
-- [ ] Staging/production require explicit environment selection and cannot share mutable resources.
-- [ ] Rollback steps preserve durable workflow/history data and restore the previous known-good artifact/config.
+- [x] Deployment fails on any required check, skipped critical test, insufficient budget margin, missing asset, or missing approval.
+- [x] Staging/production require explicit environment selection and cannot share mutable resources.
+- [x] Rollback steps preserve durable workflow/history data and restore the previous known-good artifact/config.
 
 **Verification:**
 
-- [ ] Manual check: deliberately fail each gate and confirm deployment is blocked.
+- [x] Manual check: deliberately fail each gate and confirm deployment is blocked.
 - [ ] Human approves `docs/deployment/runbook.md`.
 
 **Dependencies:** Tasks 8, 13, 39-42

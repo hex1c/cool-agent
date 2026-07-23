@@ -228,7 +228,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 ### Phase 8: System Verification and Release
 
 - [ ] Task 42: Add integration and end-to-end suites
-- [ ] Task 43: Add deployment and rollback gates
+- [x] Task 43: Add deployment and rollback gates
 - [ ] Task 44: Verify staging and prepare production approval
 
 ### Checkpoint: Version 1 Ready
