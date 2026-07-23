@@ -452,6 +452,11 @@ pub trait UsageRepository {
     type Error: Display;
 
     async fn load(&self, month: &InvoiceMonth) -> Result<Option<UsageSnapshot>, Self::Error>;
+    async fn load_reservation(
+        &self,
+        month: &InvoiceMonth,
+        reservation_id: &StorageRecordId,
+    ) -> Result<Option<UsageReservation>, Self::Error>;
     async fn reserve(
         &self,
         expected_version: u64,

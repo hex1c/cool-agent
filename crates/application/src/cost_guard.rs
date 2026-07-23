@@ -50,8 +50,17 @@ pub enum SettleMode {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SettleRequest {
-    pub reservation: UsageReservation,
+    pub workflow_id: WorkflowId,
+    pub invoice_month: InvoiceMonth,
+    pub reservation_id: StorageRecordId,
     pub mode: SettleMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ManualReviewRequest {
+    pub workflow_id: WorkflowId,
+    pub invoice_month: InvoiceMonth,
+    pub reservation_id: StorageRecordId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,6 +85,8 @@ pub enum CostGuardError {
     UsageUninitialized,
     InvoiceMonthMismatch,
     ConditionalConflict,
+    ReservationUnavailable,
+    ReservationBindingMismatch,
     InvalidReservationState,
 }
 
@@ -88,7 +99,9 @@ impl CostGuardError {
             Self::UsageUninitialized => CostGuardFailureReason::UsageUninitialized,
             Self::InvoiceMonthMismatch => CostGuardFailureReason::InvoiceMonthMismatch,
             Self::ConditionalConflict => CostGuardFailureReason::ConditionalConflict,
-            Self::InvalidReservationState => CostGuardFailureReason::InvalidProjection,
+            Self::ReservationUnavailable
+            | Self::ReservationBindingMismatch
+            | Self::InvalidReservationState => CostGuardFailureReason::InvalidProjection,
         }
     }
 }
@@ -102,6 +115,8 @@ impl Display for CostGuardError {
             Self::UsageUninitialized => "authoritative usage is not initialized",
             Self::InvoiceMonthMismatch => "usage snapshot invoice month mismatch",
             Self::ConditionalConflict => "budget reservation changed concurrently",
+            Self::ReservationUnavailable => "budget reservation is unavailable",
+            Self::ReservationBindingMismatch => "budget reservation workflow binding mismatch",
             Self::InvalidReservationState => "reservation state cannot be changed",
         })
     }
@@ -223,7 +238,7 @@ impl CostGuardService {
     ) -> Result<SettleOutcome, CostGuardError> {
         let result = self.settle_inner(repository, request).await;
         if let Err(error) = result {
-            self.emit_failure(&request.reservation.workflow_id, error);
+            self.emit_failure(&request.workflow_id, error);
         }
         result
     }
@@ -233,22 +248,23 @@ impl CostGuardService {
         repository: &R,
         request: &SettleRequest,
     ) -> Result<SettleOutcome, CostGuardError> {
-        if request.reservation.state != UsageReservationState::Reserved {
+        let reservation = self.load_reservation(repository, request).await?;
+        if reservation.state != UsageReservationState::Reserved {
             return Err(CostGuardError::InvalidReservationState);
         }
         let snapshot = self
-            .load_snapshot(repository, &request.reservation.invoice_month)
+            .load_snapshot(repository, &request.invoice_month)
             .await?;
         let (state, measured) = match request.mode {
             SettleMode::Settled => (
                 UsageReservationState::Settled,
-                Some(request.reservation.estimate_micro_inr),
+                Some(reservation.estimate_micro_inr),
             ),
             SettleMode::Released => (UsageReservationState::Released, Some(0)),
         };
         let updated = UsageReservation {
             state,
-            ..request.reservation.clone()
+            ..reservation
         };
         match repository
             .update_reservation(snapshot.optimistic_version, &updated, measured)
@@ -285,11 +301,11 @@ impl CostGuardService {
     pub async fn mark_manual_review<R: UsageRepository>(
         &self,
         repository: &R,
-        reservation: &UsageReservation,
+        request: &ManualReviewRequest,
     ) -> Result<(), CostGuardError> {
-        let result = self.mark_manual_review_inner(repository, reservation).await;
+        let result = self.mark_manual_review_inner(repository, request).await;
         if let Err(error) = result {
-            self.emit_failure(&reservation.workflow_id, error);
+            self.emit_failure(&request.workflow_id, error);
         }
         result
     }
@@ -297,17 +313,25 @@ impl CostGuardService {
     async fn mark_manual_review_inner<R: UsageRepository>(
         &self,
         repository: &R,
-        reservation: &UsageReservation,
+        request: &ManualReviewRequest,
     ) -> Result<(), CostGuardError> {
+        let reservation = repository
+            .load_reservation(&request.invoice_month, &request.reservation_id)
+            .await
+            .map_err(|_| CostGuardError::UsageUnavailable)?
+            .ok_or(CostGuardError::ReservationUnavailable)?;
+        if reservation.workflow_id != request.workflow_id {
+            return Err(CostGuardError::ReservationBindingMismatch);
+        }
         if reservation.state != UsageReservationState::Reserved {
             return Err(CostGuardError::InvalidReservationState);
         }
         let snapshot = self
-            .load_snapshot(repository, &reservation.invoice_month)
+            .load_snapshot(repository, &request.invoice_month)
             .await?;
         let updated = UsageReservation {
             state: UsageReservationState::ManualReview,
-            ..reservation.clone()
+            ..reservation
         };
         match repository
             .update_reservation(snapshot.optimistic_version, &updated, None)
@@ -319,10 +343,26 @@ impl CostGuardService {
         }
         self.sink.emit_manual_review(&ManualReviewNotice {
             environment: self.environment.clone(),
-            workflow_id: reservation.workflow_id.clone(),
-            operation_class: reservation.operation_class,
+            workflow_id: updated.workflow_id.clone(),
+            operation_class: updated.operation_class,
         });
         Ok(())
+    }
+
+    async fn load_reservation<R: UsageRepository>(
+        &self,
+        repository: &R,
+        request: &SettleRequest,
+    ) -> Result<UsageReservation, CostGuardError> {
+        let reservation = repository
+            .load_reservation(&request.invoice_month, &request.reservation_id)
+            .await
+            .map_err(|_| CostGuardError::UsageUnavailable)?
+            .ok_or(CostGuardError::ReservationUnavailable)?;
+        if reservation.workflow_id != request.workflow_id {
+            return Err(CostGuardError::ReservationBindingMismatch);
+        }
+        Ok(reservation)
     }
 
     async fn load_snapshot<R: UsageRepository>(

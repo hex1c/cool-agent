@@ -248,12 +248,18 @@ fn emit_json(value: &Value) {
 }
 
 fn emf_metadata(metric_name: &'static str) -> Value {
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_millis());
     json!({
-        "Timestamp": 0,
+        "Timestamp": timestamp,
         "CloudWatchMetrics": [{
             "Namespace": "Novus/Operations",
-            "Dimensions": [["Environment", "OperationClass", "BudgetBand", "Decision"]],
-            "Metrics": [{"Name": metric_name, "Unit": "Count"}],
+            "Dimensions": [
+                ["Environment"],
+                ["Environment", "OperationClass", "BudgetBand", "Decision"]
+            ],
+            "Metrics": [{"Name": metric_name}],
         }],
     })
 }

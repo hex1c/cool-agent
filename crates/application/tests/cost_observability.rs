@@ -9,8 +9,8 @@ use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
 
 use application::cost_guard::{
-    CostGuardError, CostGuardService, OperationEnvelopeProvider, ReserveRequest, SettleMode,
-    SettleRequest, TimeProvider,
+    CostGuardError, CostGuardService, ManualReviewRequest, OperationEnvelopeProvider,
+    ReserveRequest, SettleMode, SettleRequest, TimeProvider,
 };
 use application::observability::{
     CostGuardFailureReason, CostGuardMetric, EnvironmentLabel, ManualReviewNotice,
@@ -104,6 +104,17 @@ impl UsageRepository for FakeUsageRepository {
             return Err(FakeError);
         }
         Ok(self.snapshot.lock().unwrap().clone())
+    }
+
+    async fn load_reservation(
+        &self,
+        _month: &InvoiceMonth,
+        _reservation_id: &StorageRecordId,
+    ) -> Result<Option<UsageReservation>, Self::Error> {
+        if *self.unavailable.lock().unwrap() {
+            return Err(FakeError);
+        }
+        Ok(Some(reserved_usage()))
     }
 
     async fn reserve(
@@ -390,7 +401,10 @@ async fn cost_observability_settlement_uses_server_side_reservation_amount() {
         .settle(
             &repository,
             &SettleRequest {
-                reservation: reserved_usage(),
+                workflow_id: workflow_id(),
+                invoice_month: month(),
+                reservation_id: StorageRecordId::new("reservation-01")
+                    .expect("valid reservation id"),
                 mode: SettleMode::Settled,
             },
         )
@@ -408,7 +422,15 @@ async fn cost_observability_manual_review_stays_reserved_and_emits_notice() {
     let repository = FakeUsageRepository::with_snapshot(snapshot(0, 5_000_000, 0));
     let sink = Arc::new(RecordingSink::default());
     service(Arc::clone(&sink))
-        .mark_manual_review(&repository, &reserved_usage())
+        .mark_manual_review(
+            &repository,
+            &ManualReviewRequest {
+                workflow_id: workflow_id(),
+                invoice_month: month(),
+                reservation_id: StorageRecordId::new("reservation-01")
+                    .expect("valid reservation id"),
+            },
+        )
         .await
         .expect("manual review succeeds");
 
