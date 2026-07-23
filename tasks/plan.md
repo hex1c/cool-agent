@@ -214,9 +214,9 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 ### Phase 7: Orchestration and Infrastructure
 
 - [x] Task 38: Implement resumable Step Functions workflows
-- [ ] Task 39: Define core SAM resources and function packaging
-- [ ] Task 39A: Add IAM and isolated environment controls
-- [ ] Task 40: Complete the local AWS sandbox
+- [x] Task 39: Define core SAM resources and function packaging
+- [x] Task 39A: Add IAM and isolated environment controls
+- [x] Task 40: Complete the local AWS sandbox
 - [ ] Task 41: Implement cost enforcement and observability
 
 ### Checkpoint: Infrastructure Ready
