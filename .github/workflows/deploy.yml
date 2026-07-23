@@ -1,0 +1,122 @@
+name: Release gates
+
+# Deployment gate workflow — runs verify-release.sh to enforce all gates
+# before any deployment. Does NOT deploy to AWS; deployment is a separate
+# human-controlled step documented in docs/deployment/runbook.md.
+
+on:
+  push:
+    branches: [dev, staging, prod]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - production
+      approve:
+        description: "Approve production deployment"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+
+      # ── Determine environment ──────────────────────────────────────────
+      - name: Set environment
+        id: env
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" = "workflow_dispatch" ]]; then
+            ENV="${{ inputs.environment }}"
+            APPROVE="${{ inputs.approve }}"
+          else
+            case "${{ github.ref_name }}" in
+              dev)     ENV="dev" ;;
+              staging) ENV="staging" ;;
+              prod)    ENV="production" ;;
+              *)       echo "unknown branch: ${{ github.ref_name }}" >&2; exit 2 ;;
+            esac
+            # Push to production branch is itself the approval signal
+            if [[ "$ENV" = "production" ]]; then
+              APPROVE="true"
+            else
+              APPROVE="false"
+            fi
+          fi
+
+          # Production on workflow_dispatch requires approve=true
+          if [[ "$ENV" = "production" ]] && [[ "$APPROVE" != "true" ]]; then
+            echo "production deployment on workflow_dispatch requires approve=true" >&2
+            exit 1
+          fi
+
+          echo "environment=$ENV" >> "$GITHUB_OUTPUT"
+          echo "approve=$APPROVE" >> "$GITHUB_OUTPUT"
+
+      # ── Toolchain setup ────────────────────────────────────────────────
+      - uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88
+        with:
+          toolchain: 1.97.0
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+
+      - uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2
+        with:
+          version: "0.13.0"
+
+      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cargo-lambda@1.9.1
+
+      - uses: aws-actions/setup-sam@f84ec7d548307efafe33230528756de3c5841a17
+        with:
+          use-installer: true
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.23.1
+          cache: pnpm
+
+      - name: Install TypeScript dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Python config validation deps
+        run: python3 -m pip install --user jsonschema pyyaml
+
+      # ── Release gates ──────────────────────────────────────────────────
+      - name: Run release gates
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          ENV="${{ steps.env.outputs.environment }}"
+          APPROVE="${{ steps.env.outputs.approve }}"
+
+          ARGS=("$ENV" --require-sam-build)
+          if [[ "$APPROVE" = "true" ]]; then
+            ARGS+=(--approve)
+          fi
+
+          echo "Running: scripts/verify-release.sh ${ARGS[*]}"
+          scripts/verify-release.sh "${ARGS[@]}"
+
+      # ── Self-test: prove gates block ───────────────────────────────────
+      - name: Self-test (prove gates block)
+        shell: bash
+        run: |
+          echo "Running: scripts/verify-release-selftest.sh"
+          scripts/verify-release-selftest.sh
