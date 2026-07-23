@@ -4,10 +4,10 @@
 The checks are deliberately non-mutating: they do not send Telegram messages,
 create Google resources, revoke grants, or submit SMTP messages.
 
-Secrets are read from the process environment and, when present, from
-.credentials/phase0.env. Existing ignored files named ``telpass`` (one raw bot
-token) and ``googleoauth`` (a downloaded Google Web OAuth JSON file) are also
-supported for local compatibility.
+Secrets are read from the process environment and, when present, from the
+repository-root .env file. Existing ignored files named ``telpass`` (one raw
+bot token) and ``googleoauth`` (a downloaded Google Web OAuth JSON file) are
+also supported for local compatibility.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ import json
 import os
 import re
 import smtplib
-import socket
 import ssl
 from smtplib import SMTPAuthenticationError, SMTPException
 from ssl import SSLError
@@ -30,7 +29,7 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlencode, urlparse
 
-DEFAULT_ENV_FILE = Path(".credentials/phase0.env")
+DEFAULT_ENV_FILE = Path(".env")
 DEFAULT_TELEGRAM_TOKEN_FILE = Path("telpass")
 DEFAULT_GOOGLE_CREDENTIALS_FILE = Path("googleoauth")
 MAX_RESPONSE_BYTES = 1_000_000
@@ -555,7 +554,7 @@ def verify_hostinger(
             "Hostinger SMTP credentials",
             f"TLS failed during {phase} (details redacted)",
         )
-    except (OSError, socket.timeout, SMTPException, RuntimeError):
+    except (OSError, SMTPException, RuntimeError):
         reporter.fail(
             "Hostinger SMTP credentials",
             f"SMTP failed during {phase} (details redacted)",
@@ -575,7 +574,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "Google mutation, OAuth revocation, or email is sent."
         ),
         epilog=(
-            "Default secret file: .credentials/phase0.env (ignored by git). "
+            "Default secret file: .env (ignored by git). "
             "Exit 0=all selected checks passed, 1=failed, 2=missing/incomplete."
         ),
     )
@@ -589,7 +588,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--env-file",
         type=Path,
         default=DEFAULT_ENV_FILE,
-        help="KEY=value credential file (default: .credentials/phase0.env)",
+        help="KEY=value credential file (default: .env)",
     )
     parser.add_argument(
         "--timeout",

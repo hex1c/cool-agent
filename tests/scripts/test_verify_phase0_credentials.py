@@ -21,9 +21,14 @@ SPEC.loader.exec_module(verifier)
 
 
 class CredentialVerifierTests(unittest.TestCase):
+    def test_default_env_file_uses_standard_root_dotenv(self) -> None:
+        args = verifier.parse_args([])
+
+        self.assertEqual(args.env_file, Path(".env"))
+
     def test_env_file_preserves_password_punctuation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "phase0.env"
+            path = Path(directory) / ".env"
             path.write_text(
                 "export HOSTINGER_SMTP_PASSWORD='part=one#part-two'\n",
                 encoding="utf-8",
@@ -35,7 +40,7 @@ class CredentialVerifierTests(unittest.TestCase):
 
     def test_process_environment_overrides_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "phase0.env"
+            path = Path(directory) / ".env"
             path.write_text("TELEGRAM_BOT_TOKEN=file-value\n", encoding="utf-8")
             with mock.patch.dict(
                 os.environ, {"TELEGRAM_BOT_TOKEN": "environment-value"}, clear=False
