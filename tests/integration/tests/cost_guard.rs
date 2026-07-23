@@ -54,6 +54,20 @@ fn cost_observability_monitoring_covers_required_failure_and_threshold_signals()
 }
 
 #[test]
+fn sam_build_stages_only_the_infrastructure_build_driver() {
+    let root = repository_root();
+    let template =
+        fs::read_to_string(root.join("infrastructure/template.yaml")).expect("SAM template exists");
+    let build_driver =
+        fs::read_to_string(root.join("infrastructure/Makefile")).expect("build driver exists");
+
+    assert_eq!(template.matches("      CodeUri: .\n").count(), 14);
+    assert!(!template.contains("      CodeUri: ..\n"));
+    assert!(build_driver.contains("ARTIFACTS_DIR)/../../.."));
+    assert!(build_driver.contains("$(REPO_ROOT)/functions/workflow-actions"));
+}
+
+#[test]
 fn cost_observability_budget_writes_remain_cost_guard_only() {
     let policies =
         fs::read_to_string(repository_root().join("infrastructure/policies/functions.yaml"))

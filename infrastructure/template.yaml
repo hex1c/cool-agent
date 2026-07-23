@@ -189,7 +189,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-webhook"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.WebhookRoleArn
       MemorySize: 256
@@ -208,7 +208,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-oauth"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.OAuthRoleArn
       MemorySize: 256
@@ -233,7 +233,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-attachment-collection"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.AttachmentCollectionRoleArn
       MemorySize: 512
@@ -245,7 +245,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-workflow-action"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.WorkflowActionRoleArn
       MemorySize: 256
@@ -257,7 +257,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-pdf-render"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.PdfRenderRoleArn
       MemorySize: 1024
@@ -269,7 +269,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-delivery"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.DeliveryRoleArn
       MemorySize: 1024
@@ -281,7 +281,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-google-actions"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.GoogleActionsRoleArn
       MemorySize: 512
@@ -293,7 +293,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-calendar-actions"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.CalendarActionsRoleArn
       MemorySize: 512
@@ -305,7 +305,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-email-actions"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.EmailActionsRoleArn
       MemorySize: 512
@@ -317,7 +317,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-cost-guard-intake"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.CostGuardRoleArn
       MemorySize: 256
@@ -334,7 +334,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-cost-guard-ai"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.CostGuardRoleArn
       MemorySize: 256
@@ -351,7 +351,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-cost-guard-external"
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.CostGuardRoleArn
       MemorySize: 256
@@ -373,7 +373,7 @@ Resources:
         reservations from server-side envelopes, enforces warning/suspension/
         hard-cap thresholds, and emits redacted observability. Environment
         comes from function config, never caller payload.
-      CodeUri: ..
+      CodeUri: .
       Handler: bootstrap
       Role: !GetAtt FunctionsIamStack.Outputs.CostGuardRoleArn
       MemorySize: 256
@@ -406,7 +406,7 @@ Resources:
       BuildMethod: makefile
     Properties:
       FunctionName: !Sub "novus-${EnvironmentName}-agent-harness"
-      CodeUri: ..
+      CodeUri: .
       Runtime: nodejs22.x
       Handler: dist/src/index.handler
       Role: !GetAtt FunctionsIamStack.Outputs.AgentHarnessRoleArn
