@@ -41,6 +41,15 @@ jobs:
           toolchain: 1.97.0
           components: rustfmt, clippy, llvm-tools-preview
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+        with:
+          # Toolchain is pinned to 1.97.0 via rust-toolchain.toml + dtolnay,
+          # so do NOT hash the runner's pre-installed system Rust (e.g. 1.97.1)
+          # into the key -- GitHub bumps that patch version frequently and every
+          # run would otherwise miss the cache. Supply an explicit dependency
+          # configuration hash because disabling the automatic environment hash
+          # also disables rust-cache's automatic manifest/lockfile hash.
+          add-rust-environment-hash-key: false
+          key: ${{ hashFiles('**/Cargo.toml', '**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
       # cargo-llvm-cov builds into a separate target dir (target/llvm-cov-target)
       # with -Cinstrument-coverage + cfg(coverage), so its artifacts are
       # incompatible with the normal target/ cache and cannot be reused.
@@ -50,6 +59,14 @@ jobs:
         with:
           workspaces: ". -> target/llvm-cov-target"
           shared-key: llvm-cov
+          add-rust-environment-hash-key: false
+          key: ${{ hashFiles('**/Cargo.toml', '**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
+          # This action's post-run executes BEFORE the main rust-cache post-run
+          # (post-run runs in reverse step order). cache-bin: false stops it
+          # from cleaning ~/.cargo/bin, which would otherwise remove the cargo
+          # proxy and make the main action's `cargo metadata` fail -- leaving the
+          # main target/ cache empty (~1.8 KiB).
+          cache-bin: false
       - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
         with:
           tool: cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7
