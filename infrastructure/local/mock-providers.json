@@ -34,7 +34,7 @@
       "status": 302,
       "headers": {
         "Content-Type": "application/json",
-        "Location": "http://localhost:8081/oauth/callback?code=local-code&state=local-state"
+        "Location": "/oauth/callback?code=local-code&state=local-state"
       },
       "body": { "status": "sandbox_authorized" }
     },
@@ -58,7 +58,7 @@
         "id": "sandbox-drive-file-1",
         "name": "sandbox-quotation.pdf",
         "mimeType": "application/pdf",
-        "webViewLink": "http://localhost:8081/drive/files/sandbox-drive-file-1"
+        "webViewLink": "/drive/files/sandbox-drive-file-1"
       }
     },
     {
@@ -68,7 +68,7 @@
       "body": {
         "id": "sandbox-calendar-event-1",
         "status": "confirmed",
-        "htmlLink": "http://localhost:8081/calendar/events/sandbox-calendar-event-1",
+        "htmlLink": "/calendar/events/sandbox-calendar-event-1",
         "summary": "Sandbox planning meeting"
       }
     },

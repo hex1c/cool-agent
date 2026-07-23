@@ -4,10 +4,10 @@
 
 //! Live verification for the Task 40 local AWS sandbox.
 //!
-//! The test skips only when no sandbox endpoint is available and no endpoint
-//! override was provided. Once any sandbox service is detected, every required
-//! service must pass: DynamoDB conditional writes, S3, SSM, Step Functions
-//! seeded wait/resume, Telegram webhook calls, OAuth, Google, SMTP, and AI.
+//! The explicitly selected integration test fails when any sandbox service is
+//! unavailable. Every required service must pass: DynamoDB conditional writes,
+//! S3, SSM, Step Functions seeded wait/resume, Telegram webhook intake and API
+//! calls, OAuth, Google, SMTP, and AI.
 
 use std::error::Error;
 use std::io::{Error as IoError, ErrorKind};
@@ -18,17 +18,22 @@ use aws_sdk_dynamodb::config::{Credentials as DynamoCredentials, Region as Dynam
 use aws_sdk_dynamodb::types::AttributeValue;
 use aws_sdk_s3::config::{Credentials as S3Credentials, Region as S3Region};
 use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_sfn::config::{Credentials as SfnCredentials, Region as SfnRegion};
+use aws_sdk_sfn::types::ExecutionStatus;
 use aws_sdk_ssm::config::{Credentials as SsmCredentials, Region as SsmRegion};
 use reqwest::{Client, StatusCode, redirect::Policy};
 use serde_json::{Value, json};
+use telegram::{WebhookVerifier, normalize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 use uuid::Uuid;
 
 const APPLICATION_TABLE: &str = "novus-development-application";
 const ARTIFACT_BUCKET: &str = "novus-development-artifacts-local";
 const TELEGRAM_SECRET: &str = "/novus/development/telegram/bot-token";
+const WEBHOOK_SECRET: &str = "/novus/development/telegram/webhook-secret";
+const WAIT_RESUME_STATE_MACHINE: &str = "novus-local-wait-resume";
 
 fn endpoint(name: &str, default: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| default.to_owned())
@@ -37,23 +42,6 @@ fn endpoint(name: &str, default: &str) -> String {
 fn port_open(port: u16) -> bool {
     let address = SocketAddr::from(([127, 0, 0, 1], port));
     StdTcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok()
-}
-
-fn sandbox_requested() -> bool {
-    [
-        "DYNAMODB_ENDPOINT",
-        "LOCALSTACK_ENDPOINT",
-        "STEPFUNCTIONS_ENDPOINT",
-        "MOCK_PROVIDERS_ENDPOINT",
-        "SMTP_ENDPOINT",
-        "MAILHOG_ENDPOINT",
-    ]
-    .iter()
-    .any(|name| std::env::var_os(name).is_some())
-        || [8000, 4566, 8083, 8081, 1025, 8025]
-            .iter()
-            .copied()
-            .any(port_open)
 }
 
 fn dynamodb_client(endpoint: &str) -> aws_sdk_dynamodb::Client {
@@ -89,6 +77,22 @@ fn s3_client(endpoint: &str) -> aws_sdk_s3::Client {
     aws_sdk_s3::Client::from_conf(config)
 }
 
+fn sfn_client(endpoint: &str) -> aws_sdk_sfn::Client {
+    let config = aws_sdk_sfn::Config::builder()
+        .behavior_version_latest()
+        .endpoint_url(endpoint)
+        .region(SfnRegion::new("us-east-1"))
+        .credentials_provider(SfnCredentials::new(
+            "test",
+            "test",
+            None,
+            None,
+            "local-sandbox",
+        ))
+        .build();
+    aws_sdk_sfn::Client::from_conf(config)
+}
+
 fn ssm_client(endpoint: &str) -> aws_sdk_ssm::Client {
     let config = aws_sdk_ssm::Config::builder()
         .behavior_version_latest()
@@ -105,9 +109,35 @@ fn ssm_client(endpoint: &str) -> aws_sdk_ssm::Client {
     aws_sdk_ssm::Client::from_conf(config)
 }
 
+async fn wait_resume_succeeded(sfn: &aws_sdk_sfn::Client) -> bool {
+    let Ok(state_machines) = sfn.list_state_machines().send().await else {
+        return false;
+    };
+    let Some(state_machine) = state_machines
+        .state_machines()
+        .iter()
+        .find(|item| item.name() == WAIT_RESUME_STATE_MACHINE)
+    else {
+        return false;
+    };
+    let Ok(executions) = sfn
+        .list_executions()
+        .state_machine_arn(state_machine.state_machine_arn())
+        .send()
+        .await
+    else {
+        return false;
+    };
+    executions
+        .executions()
+        .iter()
+        .any(|execution| execution.status() == &ExecutionStatus::Succeeded)
+}
+
 async fn wait_for_seed(
     dynamodb: &aws_sdk_dynamodb::Client,
     s3: &aws_sdk_s3::Client,
+    sfn: &aws_sdk_sfn::Client,
     ssm: &aws_sdk_ssm::Client,
 ) -> Result<(), Box<dyn Error>> {
     for _ in 0..60 {
@@ -130,14 +160,15 @@ async fn wait_for_seed(
             .send()
             .await
             .is_ok();
-        if table_ready && bucket_ready && secret_ready {
+        let wait_resume_ready = wait_resume_succeeded(sfn).await;
+        if table_ready && bucket_ready && secret_ready && wait_resume_ready {
             return Ok(());
         }
         sleep(Duration::from_millis(500)).await;
     }
     Err(IoError::new(
         ErrorKind::TimedOut,
-        "sandbox-init did not seed DynamoDB, S3, and SSM within 30 seconds",
+        "sandbox-init did not seed DynamoDB, S3, SSM, and Step Functions within 30 seconds",
     )
     .into())
 }
@@ -178,7 +209,7 @@ async fn smtp_command(
     smtp_response(stream, expected_code).await
 }
 
-async fn exercise_smtp(endpoint: &str) -> Result<(), Box<dyn Error>> {
+async fn exercise_smtp(endpoint: &str, marker: &str) -> Result<(), Box<dyn Error>> {
     let address = endpoint
         .strip_prefix("smtp://")
         .unwrap_or(endpoint)
@@ -191,7 +222,9 @@ async fn exercise_smtp(endpoint: &str) -> Result<(), Box<dyn Error>> {
     smtp_command(&mut stream, "DATA\r\n", "354").await?;
     smtp_command(
         &mut stream,
-        "Subject: Novus sandbox SMTP path\r\n\r\nSanitized local message.\r\n.\r\n",
+        &format!(
+            "Subject: Novus sandbox SMTP path {marker}\r\n\r\nSanitized local message.\r\n.\r\n"
+        ),
         "250",
     )
     .await?;
@@ -203,8 +236,12 @@ async fn verify_provider_paths(
     mock_endpoint: &str,
     mailhog_endpoint: &str,
     smtp_endpoint: &str,
+    smtp_marker: &str,
 ) -> Result<(), Box<dyn Error>> {
-    let client = Client::builder().redirect(Policy::none()).build()?;
+    let client = Client::builder()
+        .redirect(Policy::none())
+        .timeout(Duration::from_secs(5))
+        .build()?;
 
     let membership = post_json(
         &client,
@@ -266,7 +303,11 @@ async fn verify_provider_paths(
     )?;
     assert_eq!(extraction["schemaVersion"], "novus.extraction.v1");
 
-    exercise_smtp(smtp_endpoint).await?;
+    timeout(
+        Duration::from_secs(5),
+        exercise_smtp(smtp_endpoint, smtp_marker),
+    )
+    .await??;
     for _ in 0..20 {
         let response = client
             .get(format!("{mailhog_endpoint}/api/v2/messages"))
@@ -276,7 +317,7 @@ async fn verify_provider_paths(
             .error_for_status()?
             .text()
             .await?
-            .contains("Novus sandbox SMTP path")
+            .contains(smtp_marker)
         {
             return Ok(());
         }
@@ -291,11 +332,6 @@ async fn verify_provider_paths(
 
 #[tokio::test]
 async fn local_sandbox_exercises_seeded_aws_and_provider_paths() -> Result<(), Box<dyn Error>> {
-    if !sandbox_requested() {
-        eprintln!("skipping local sandbox integration test: no sandbox endpoints are available");
-        return Ok(());
-    }
-
     for (override_name, port) in [
         ("DYNAMODB_ENDPOINT", 8000),
         ("LOCALSTACK_ENDPOINT", 4566),
@@ -315,14 +351,16 @@ async fn local_sandbox_exercises_seeded_aws_and_provider_paths() -> Result<(), B
 
     let dynamodb_endpoint = endpoint("DYNAMODB_ENDPOINT", "http://127.0.0.1:8000");
     let localstack_endpoint = endpoint("LOCALSTACK_ENDPOINT", "http://127.0.0.1:4566");
+    let stepfunctions_endpoint = endpoint("STEPFUNCTIONS_ENDPOINT", "http://127.0.0.1:8083");
     let mock_endpoint = endpoint("MOCK_PROVIDERS_ENDPOINT", "http://127.0.0.1:8081");
     let smtp_endpoint = endpoint("SMTP_ENDPOINT", "127.0.0.1:1025");
     let mailhog_endpoint = endpoint("MAILHOG_ENDPOINT", "http://127.0.0.1:8025");
 
     let dynamodb = dynamodb_client(&dynamodb_endpoint);
     let s3 = s3_client(&localstack_endpoint);
+    let sfn = sfn_client(&stepfunctions_endpoint);
     let ssm = ssm_client(&localstack_endpoint);
-    wait_for_seed(&dynamodb, &s3, &ssm).await?;
+    wait_for_seed(&dynamodb, &s3, &sfn, &ssm).await?;
 
     let unique = Uuid::new_v4().simple().to_string();
     let pk = format!("SANDBOX#CONDITIONAL#{unique}");
@@ -381,11 +419,28 @@ async fn local_sandbox_exercises_seeded_aws_and_provider_paths() -> Result<(), B
         Some("local-test-token")
     );
 
+    let webhook_secret = ssm
+        .get_parameter()
+        .name(WEBHOOK_SECRET)
+        .with_decryption(true)
+        .send()
+        .await?;
+    let webhook_secret = webhook_secret
+        .parameter()
+        .and_then(|parameter| parameter.value())
+        .ok_or_else(|| IoError::other("seeded webhook secret has no value"))?;
+    WebhookVerifier::new(webhook_secret.to_owned())
+        .verify(Some("local-webhook-secret-not-real"))?;
+    let normalized = normalize::normalize(include_bytes!(
+        "../../../tests/fixtures/telegram/mention.json"
+    ))?;
+    assert_eq!(normalized.update_id, 1001);
+
     let mocks: Value = serde_json::from_str(include_str!(
         "../../../infrastructure/local/mock-providers.json"
     ))?;
     assert_eq!(mocks["sanitized"], true);
-    verify_provider_paths(&mock_endpoint, &mailhog_endpoint, &smtp_endpoint).await?;
+    verify_provider_paths(&mock_endpoint, &mailhog_endpoint, &smtp_endpoint, &unique).await?;
 
     dynamodb
         .delete_item()

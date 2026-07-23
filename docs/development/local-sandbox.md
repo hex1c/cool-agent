@@ -65,13 +65,14 @@ The integration test proves:
 - a duplicate DynamoDB conditional write is rejected;
 - an S3 object round-trips and a fake SSM secret resolves;
 - the seeded Step Functions Wait execution completes;
-- Telegram webhook delivery/membership, OAuth, Drive, Calendar, and AI mock
-  paths respond with their versioned sanitized fixtures;
+- Telegram webhook secret verification and update normalization run through the
+  real intake code, while delivery/membership, OAuth, Drive, Calendar, and AI
+  provider paths respond with versioned sanitized fixtures;
 - an SMTP message is accepted and visible through the MailHog API.
 
-When no sandbox endpoint is available and no override is set, the live test
-skips so normal unit-only CI remains credential-free. If any sandbox service is
-detected, every required service must pass.
+The explicitly selected live test fails when any required service is missing.
+CI starts the same credential-free compose sandbox before running all-feature
+Rust tests, so a green result always represents exercised local integrations.
 
 ## Local parity limits
 

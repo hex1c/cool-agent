@@ -58,12 +58,16 @@ create_table() {
     --table-name "$table" >/dev/null 2>&1; then
     return
   fi
-  aws --endpoint-url "$DYNAMODB_ENDPOINT" dynamodb create-table \
+  if ! aws --endpoint-url "$DYNAMODB_ENDPOINT" dynamodb create-table \
     --table-name "$table" \
     --billing-mode PAY_PER_REQUEST \
     --attribute-definitions AttributeName=pk,AttributeType=S AttributeName=sk,AttributeType=S \
     --key-schema AttributeName=pk,KeyType=HASH AttributeName=sk,KeyType=RANGE \
-    >/dev/null
+    >/dev/null 2>&1; then
+    # Another initializer may have won the create race.
+    aws --endpoint-url "$DYNAMODB_ENDPOINT" dynamodb describe-table \
+      --table-name "$table" >/dev/null
+  fi
 }
 
 wait_for_dynamodb
@@ -80,8 +84,12 @@ aws --endpoint-url "$DYNAMODB_ENDPOINT" dynamodb put-item \
 
 if ! aws --endpoint-url "$LOCALSTACK_ENDPOINT" s3api head-bucket \
   --bucket "$ARTIFACT_BUCKET" >/dev/null 2>&1; then
-  aws --endpoint-url "$LOCALSTACK_ENDPOINT" s3api create-bucket \
-    --bucket "$ARTIFACT_BUCKET" >/dev/null
+  if ! aws --endpoint-url "$LOCALSTACK_ENDPOINT" s3api create-bucket \
+    --bucket "$ARTIFACT_BUCKET" >/dev/null 2>&1; then
+    # Another initializer may have won the create race.
+    aws --endpoint-url "$LOCALSTACK_ENDPOINT" s3api head-bucket \
+      --bucket "$ARTIFACT_BUCKET" >/dev/null
+  fi
 fi
 
 put_secret() {
@@ -101,16 +109,26 @@ put_secret /novus/development/smtp/credentials local-smtp-credentials-not-real
 put_secret /novus/development/ai/provider-key local-ai-key-not-real
 
 state_machine_name=novus-local-wait-resume
+state_machine_definition='{"Comment":"Sanitized local wait/resume proof","StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":1,"Next":"Done"},"Done":{"Type":"Succeed"}}}'
 state_machine_arn=$(aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions list-state-machines \
   --query "stateMachines[?name=='$state_machine_name'].stateMachineArn | [0]" \
   --output text)
 if [ "$state_machine_arn" = "None" ] || [ -z "$state_machine_arn" ]; then
-  state_machine_arn=$(aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions create-state-machine \
+  if ! state_machine_arn=$(aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions create-state-machine \
     --name "$state_machine_name" \
-    --definition '{"Comment":"Sanitized local wait/resume proof","StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":1,"Next":"Done"},"Done":{"Type":"Succeed"}}}' \
+    --definition "$state_machine_definition" \
     --role-arn arn:aws:iam::123456789012:role/NovusLocalDummyRole \
     --query stateMachineArn \
-    --output text)
+    --output text); then
+    # Another initializer may have won the create race.
+    state_machine_arn=$(aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions list-state-machines \
+      --query "stateMachines[?name=='$state_machine_name'].stateMachineArn | [0]" \
+      --output text)
+  fi
+else
+  aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions update-state-machine \
+    --state-machine-arn "$state_machine_arn" \
+    --definition "$state_machine_definition" >/dev/null
 fi
 execution_arn=$(aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions start-execution \
   --state-machine-arn "$state_machine_arn" \
