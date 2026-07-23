@@ -127,6 +127,10 @@ jobs:
             BASE="HEAD~1"
           fi
           mapfile -t CHANGED < <(git diff --name-only --diff-filter=d "$BASE...HEAD" -- '*.rs')
+          if [ "${#CHANGED[@]}" -eq 0 ]; then
+            echo 'No changed Rust files; skipping coverage summary.' >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           python3 .github/scripts/coverage-summary.py coverage.lcov "${CHANGED[@]}" >> "$GITHUB_STEP_SUMMARY"
       - name: Stop local sandbox
         if: always()
