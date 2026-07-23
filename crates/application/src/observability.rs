@@ -5,12 +5,13 @@
 //! Metric dimensions are deliberately low-cardinality. Opaque workflow IDs are
 //! included as log properties for correlation, never as CloudWatch dimensions.
 
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Display, Formatter, Write};
 
 use domain::BudgetBand;
 use domain::identity::WorkflowId;
 use domain::workflow::WorkflowStateKind;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 
 use crate::repositories::UsageOperationClass;
 
@@ -109,7 +110,7 @@ impl CostGuardMetric {
             "Decision": self.outcome.as_str(),
             "ProjectedMonthlyCostMicroInr": self.projected_micro_inr,
             "event": "cost_guard_decision",
-            "workflow_id": self.workflow_id.as_str(),
+            "workflow_ref": workflow_reference(&self.workflow_id),
             "warning_crossed": self.warning_crossed,
         })
     }
@@ -134,7 +135,7 @@ impl StageProgress {
             "Decision": self.outcome.as_str(),
             "WorkflowStageFailureCount": failed,
             "event": "workflow_stage_progress",
-            "workflow_id": self.workflow_id.as_str(),
+            "workflow_ref": workflow_reference(&self.workflow_id),
             "stage": workflow_stage_label(self.stage),
             "outcome": self.outcome.as_str(),
         })
@@ -158,7 +159,7 @@ impl ManualReviewNotice {
             "Decision": "manual_review",
             "ManualReviewCount": 1,
             "event": "manual_review_required",
-            "workflow_id": self.workflow_id.as_str(),
+            "workflow_ref": workflow_reference(&self.workflow_id),
         })
     }
 }
@@ -235,10 +236,19 @@ impl ObservabilitySink for StdoutObservabilitySink {
             "Decision": "denied",
             "CostGuardFailureCount": 1,
             "event": "cost_guard_failure",
-            "workflow_id": workflow_id.as_str(),
+            "workflow_ref": workflow_reference(workflow_id),
             "reason": reason.as_str(),
         }));
     }
+}
+
+fn workflow_reference(workflow_id: &WorkflowId) -> String {
+    let digest = Sha256::digest(workflow_id.as_str().as_bytes());
+    let mut reference = String::with_capacity(16);
+    for byte in digest.iter().take(8) {
+        let _ = write!(reference, "{byte:02x}");
+    }
+    reference
 }
 
 fn emit_json(value: &Value) {

@@ -29,6 +29,18 @@ pub trait TimeProvider: Send + Sync {
 pub trait OperationEnvelopeProvider: Send + Sync {
     /// Returns an approved, conservative estimate in micro-INR.
     fn estimate(&self, operation_class: UsageOperationClass) -> Option<u64>;
+    /// Maximum duration during which the operation can incur new cost.
+    fn reservation_horizon_seconds(&self, operation_class: UsageOperationClass) -> u64;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CostPolicyEvidence {
+    pub pricing_version: StorageRecordId,
+    pub pricing_approval_id: StorageRecordId,
+    pub pricing_approved_at: WorkflowTimestamp,
+    pub pricing_max_age_seconds: u64,
+    pub attribution_complete: bool,
+    pub reconciliation_max_age_seconds: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +66,12 @@ pub struct SettleRequest {
     pub invoice_month: InvoiceMonth,
     pub reservation_id: StorageRecordId,
     pub mode: SettleMode,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObserveRequest {
+    pub workflow_id: WorkflowId,
+    pub invoice_month: InvoiceMonth,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +102,10 @@ pub enum CostGuardError {
     UsageUnavailable,
     UsageUninitialized,
     InvoiceMonthMismatch,
+    ReconciliationStale,
+    AttributionIncomplete,
+    PricingUnapproved,
+    MonthRolloverUnsupported,
     ConditionalConflict,
     ReservationUnavailable,
     ReservationBindingMismatch,
@@ -98,6 +120,10 @@ impl CostGuardError {
             Self::UsageUnavailable => CostGuardFailureReason::UsageUnavailable,
             Self::UsageUninitialized => CostGuardFailureReason::UsageUninitialized,
             Self::InvoiceMonthMismatch => CostGuardFailureReason::InvoiceMonthMismatch,
+            Self::ReconciliationStale
+            | Self::AttributionIncomplete
+            | Self::PricingUnapproved
+            | Self::MonthRolloverUnsupported => CostGuardFailureReason::InvalidProjection,
             Self::ConditionalConflict => CostGuardFailureReason::ConditionalConflict,
             Self::ReservationUnavailable
             | Self::ReservationBindingMismatch
@@ -114,6 +140,12 @@ impl Display for CostGuardError {
             Self::UsageUnavailable => "authoritative usage is unavailable",
             Self::UsageUninitialized => "authoritative usage is not initialized",
             Self::InvoiceMonthMismatch => "usage snapshot invoice month mismatch",
+            Self::ReconciliationStale => "billing reconciliation is stale",
+            Self::AttributionIncomplete => "shared-cost attribution is incomplete",
+            Self::PricingUnapproved => "pricing configuration is not approved",
+            Self::MonthRolloverUnsupported => {
+                "operation could cross an invoice month without dual-month capacity"
+            }
             Self::ConditionalConflict => "budget reservation changed concurrently",
             Self::ReservationUnavailable => "budget reservation is unavailable",
             Self::ReservationBindingMismatch => "budget reservation workflow binding mismatch",
@@ -137,6 +169,7 @@ pub struct CostGuardService {
     environment: EnvironmentLabel,
     sink: Arc<dyn ObservabilitySink>,
     time: Arc<dyn TimeProvider>,
+    evidence: CostPolicyEvidence,
 }
 
 impl CostGuardService {
@@ -147,6 +180,7 @@ impl CostGuardService {
         environment: EnvironmentLabel,
         sink: Arc<dyn ObservabilitySink>,
         time: Arc<dyn TimeProvider>,
+        evidence: CostPolicyEvidence,
     ) -> Self {
         Self {
             thresholds,
@@ -155,6 +189,7 @@ impl CostGuardService {
             environment,
             sink,
             time,
+            evidence,
         }
     }
 
@@ -175,6 +210,10 @@ impl CostGuardService {
         repository: &R,
         request: &ReserveRequest,
     ) -> Result<ReserveOutcome, CostGuardError> {
+        if request.pricing_version != self.evidence.pricing_version {
+            return Err(CostGuardError::PricingUnapproved);
+        }
+        self.ensure_operation_stays_in_month(request)?;
         let estimate = self
             .envelope
             .estimate(request.operation_class)
@@ -185,6 +224,34 @@ impl CostGuardService {
             .load_snapshot(repository, &request.invoice_month)
             .await?;
         let current = effective_projection(&snapshot)?;
+        if let Some(existing) = repository
+            .load_reservation(&request.invoice_month, &request.reservation_id)
+            .await
+            .map_err(|_| CostGuardError::UsageUnavailable)?
+        {
+            if !same_reservation_inputs(&existing, request, estimate_with_margin)
+                || existing.state != UsageReservationState::Reserved
+            {
+                return Err(CostGuardError::ConditionalConflict);
+            }
+            let decision = evaluate_budget(
+                self.thresholds,
+                BudgetEvaluation::new(
+                    BudgetAction::ConfirmedOperation {
+                        funding: ConfirmedOperationFunding::ExistingReservation,
+                    },
+                    current,
+                    current,
+                )?,
+            );
+            let metric = self.metric(request, decision, CostGuardOutcome::Permitted);
+            self.sink.emit_cost_metric(&metric);
+            return Ok(ReserveOutcome {
+                decision,
+                reservation: Some(existing),
+                metric,
+            });
+        }
         let projected = current
             .checked_add(estimate_with_margin)
             .ok_or(CostGuardError::ProjectionOverflow)?;
@@ -219,16 +286,73 @@ impl CostGuardService {
             .map_err(|_| CostGuardError::UsageUnavailable)?
         {
             ConditionalWriteOutcome::Committed => {
+                let persisted = repository
+                    .load_reservation(&request.invoice_month, &request.reservation_id)
+                    .await
+                    .map_err(|_| CostGuardError::UsageUnavailable)?
+                    .ok_or(CostGuardError::ReservationUnavailable)?;
+                if !same_logical_reservation(&persisted, &reservation) {
+                    return Err(CostGuardError::ConditionalConflict);
+                }
                 metric.outcome = CostGuardOutcome::Permitted;
                 self.sink.emit_cost_metric(&metric);
                 Ok(ReserveOutcome {
                     decision,
-                    reservation: Some(reservation),
+                    reservation: Some(persisted),
                     metric,
                 })
             }
-            ConditionalWriteOutcome::Conflict => Err(CostGuardError::ConditionalConflict),
+            ConditionalWriteOutcome::Conflict => {
+                let persisted = repository
+                    .load_reservation(&request.invoice_month, &request.reservation_id)
+                    .await
+                    .map_err(|_| CostGuardError::UsageUnavailable)?
+                    .ok_or(CostGuardError::ConditionalConflict)?;
+                if !same_logical_reservation(&persisted, &reservation) {
+                    return Err(CostGuardError::ConditionalConflict);
+                }
+                metric.outcome = CostGuardOutcome::Permitted;
+                self.sink.emit_cost_metric(&metric);
+                Ok(ReserveOutcome {
+                    decision,
+                    reservation: Some(persisted),
+                    metric,
+                })
+            }
         }
+    }
+
+    pub async fn observe<R: UsageRepository>(
+        &self,
+        repository: &R,
+        request: &ObserveRequest,
+    ) -> Result<CostGuardMetric, CostGuardError> {
+        let result = async {
+            let snapshot = self
+                .load_snapshot(repository, &request.invoice_month)
+                .await?;
+            let projection = effective_projection(&snapshot)?;
+            let decision = evaluate_budget(
+                self.thresholds,
+                BudgetEvaluation::new(BudgetAction::Status, projection, projection)?,
+            );
+            let metric = CostGuardMetric {
+                environment: self.environment.clone(),
+                workflow_id: request.workflow_id.clone(),
+                operation_class: UsageOperationClass::Status,
+                band: decision.band(),
+                outcome: CostGuardOutcome::Permitted,
+                warning_crossed: false,
+                projected_micro_inr: projection,
+            };
+            self.sink.emit_cost_metric(&metric);
+            Ok(metric)
+        }
+        .await;
+        if let Err(error) = result {
+            self.emit_failure(&request.workflow_id, error);
+        }
+        result
     }
 
     pub async fn settle<R: UsageRepository>(
@@ -249,9 +373,6 @@ impl CostGuardService {
         request: &SettleRequest,
     ) -> Result<SettleOutcome, CostGuardError> {
         let reservation = self.load_reservation(repository, request).await?;
-        if reservation.state != UsageReservationState::Reserved {
-            return Err(CostGuardError::InvalidReservationState);
-        }
         let snapshot = self
             .load_snapshot(repository, &request.invoice_month)
             .await?;
@@ -262,6 +383,15 @@ impl CostGuardService {
             ),
             SettleMode::Released => (UsageReservationState::Released, Some(0)),
         };
+        if reservation.state == state {
+            return Ok(SettleOutcome {
+                metric: self.settlement_metric(&reservation, &snapshot)?,
+                reservation,
+            });
+        }
+        if reservation.state != UsageReservationState::Reserved {
+            return Err(CostGuardError::InvalidReservationState);
+        }
         let updated = UsageReservation {
             state,
             ..reservation
@@ -274,24 +404,10 @@ impl CostGuardService {
             ConditionalWriteOutcome::Committed => {}
             ConditionalWriteOutcome::Conflict => return Err(CostGuardError::ConditionalConflict),
         }
-        let decision = evaluate_budget(
-            self.thresholds,
-            BudgetEvaluation::new(
-                BudgetAction::Status,
-                effective_projection(&snapshot)?,
-                effective_projection(&snapshot)?,
-            )?,
-        );
-        let metric = CostGuardMetric {
-            environment: self.environment.clone(),
-            workflow_id: updated.workflow_id.clone(),
-            operation_class: updated.operation_class,
-            band: decision.band(),
-            outcome: CostGuardOutcome::Permitted,
-            warning_crossed: false,
-            projected_micro_inr: decision.projected_after_action_micro_inr(),
-        };
-        self.sink.emit_cost_metric(&metric);
+        let updated_snapshot = self
+            .load_snapshot(repository, &request.invoice_month)
+            .await?;
+        let metric = self.settlement_metric(&updated, &updated_snapshot)?;
         Ok(SettleOutcome {
             reservation: updated,
             metric,
@@ -322,6 +438,14 @@ impl CostGuardService {
             .ok_or(CostGuardError::ReservationUnavailable)?;
         if reservation.workflow_id != request.workflow_id {
             return Err(CostGuardError::ReservationBindingMismatch);
+        }
+        if reservation.state == UsageReservationState::ManualReview {
+            self.sink.emit_manual_review(&ManualReviewNotice {
+                environment: self.environment.clone(),
+                workflow_id: reservation.workflow_id,
+                operation_class: reservation.operation_class,
+            });
+            return Ok(());
         }
         if reservation.state != UsageReservationState::Reserved {
             return Err(CostGuardError::InvalidReservationState);
@@ -370,15 +494,108 @@ impl CostGuardService {
         repository: &R,
         invoice_month: &InvoiceMonth,
     ) -> Result<UsageSnapshot, CostGuardError> {
-        let snapshot = repository
+        let snapshot = match repository
             .load(invoice_month)
             .await
             .map_err(|_| CostGuardError::UsageUnavailable)?
-            .ok_or(CostGuardError::UsageUninitialized)?;
+        {
+            Some(snapshot) => snapshot,
+            None => {
+                let now = self.time.now();
+                let initial = UsageSnapshot {
+                    invoice_month: invoice_month.clone(),
+                    settled_micro_inr: 0,
+                    reserved_micro_inr: 0,
+                    reconciled_micro_inr: 0,
+                    reconciliation_observed_at: now,
+                    attribution_complete: self.evidence.attribution_complete,
+                    pricing_version: self.evidence.pricing_version.clone(),
+                    pricing_approval_id: self.evidence.pricing_approval_id.clone(),
+                    pricing_approved_at: self.evidence.pricing_approved_at,
+                    optimistic_version: 0,
+                };
+                repository
+                    .initialize(&initial)
+                    .await
+                    .map_err(|_| CostGuardError::UsageUnavailable)?;
+                repository
+                    .load(invoice_month)
+                    .await
+                    .map_err(|_| CostGuardError::UsageUnavailable)?
+                    .ok_or(CostGuardError::UsageUninitialized)?
+            }
+        };
         if &snapshot.invoice_month != invoice_month {
             return Err(CostGuardError::InvoiceMonthMismatch);
         }
+        let now = self.time.now().as_unix_seconds();
+        let observed = snapshot.reconciliation_observed_at.as_unix_seconds();
+        if observed > now || now - observed > self.evidence.reconciliation_max_age_seconds {
+            return Err(CostGuardError::ReconciliationStale);
+        }
+        if !snapshot.attribution_complete {
+            return Err(CostGuardError::AttributionIncomplete);
+        }
+        let approved = snapshot.pricing_approved_at.as_unix_seconds();
+        if snapshot.pricing_version != self.evidence.pricing_version
+            || snapshot.pricing_approval_id != self.evidence.pricing_approval_id
+            || snapshot.pricing_approved_at != self.evidence.pricing_approved_at
+            || approved > now
+            || now - approved > self.evidence.pricing_max_age_seconds
+        {
+            return Err(CostGuardError::PricingUnapproved);
+        }
         Ok(snapshot)
+    }
+
+    fn ensure_operation_stays_in_month(
+        &self,
+        request: &ReserveRequest,
+    ) -> Result<(), CostGuardError> {
+        let now = self.time.now().as_unix_seconds();
+        let end = now
+            .checked_add(
+                self.envelope
+                    .reservation_horizon_seconds(request.operation_class),
+            )
+            .ok_or(CostGuardError::ProjectionOverflow)?;
+        let now = i64::try_from(now).map_err(|_| CostGuardError::ProjectionOverflow)?;
+        let end = i64::try_from(end).map_err(|_| CostGuardError::ProjectionOverflow)?;
+        let now = time::OffsetDateTime::from_unix_timestamp(now)
+            .map_err(|_| CostGuardError::ProjectionOverflow)?;
+        let end = time::OffsetDateTime::from_unix_timestamp(end)
+            .map_err(|_| CostGuardError::ProjectionOverflow)?;
+        let current_month = format!("{:04}-{:02}", now.year(), now.month() as u8);
+        if request.invoice_month.as_str() != current_month {
+            return Err(CostGuardError::InvoiceMonthMismatch);
+        }
+        if now.year() != end.year() || now.month() != end.month() {
+            return Err(CostGuardError::MonthRolloverUnsupported);
+        }
+        Ok(())
+    }
+
+    fn settlement_metric(
+        &self,
+        reservation: &UsageReservation,
+        snapshot: &UsageSnapshot,
+    ) -> Result<CostGuardMetric, CostGuardError> {
+        let projection = effective_projection(snapshot)?;
+        let decision = evaluate_budget(
+            self.thresholds,
+            BudgetEvaluation::new(BudgetAction::Status, projection, projection)?,
+        );
+        let metric = CostGuardMetric {
+            environment: self.environment.clone(),
+            workflow_id: reservation.workflow_id.clone(),
+            operation_class: reservation.operation_class,
+            band: decision.band(),
+            outcome: CostGuardOutcome::Permitted,
+            warning_crossed: false,
+            projected_micro_inr: decision.projected_after_action_micro_inr(),
+        };
+        self.sink.emit_cost_metric(&metric);
+        Ok(metric)
     }
 
     fn metric(
@@ -402,6 +619,29 @@ impl CostGuardService {
         self.sink
             .emit_cost_guard_failure(&self.environment, workflow_id, error.failure_reason());
     }
+}
+
+fn same_reservation_inputs(
+    reservation: &UsageReservation,
+    request: &ReserveRequest,
+    estimate_micro_inr: u64,
+) -> bool {
+    reservation.reservation_id == request.reservation_id
+        && reservation.workflow_id == request.workflow_id
+        && reservation.invoice_month == request.invoice_month
+        && reservation.operation_class == request.operation_class
+        && reservation.estimate_micro_inr == estimate_micro_inr
+        && reservation.pricing_version == request.pricing_version
+}
+
+fn same_logical_reservation(left: &UsageReservation, right: &UsageReservation) -> bool {
+    left.reservation_id == right.reservation_id
+        && left.workflow_id == right.workflow_id
+        && left.invoice_month == right.invoice_month
+        && left.operation_class == right.operation_class
+        && left.estimate_micro_inr == right.estimate_micro_inr
+        && left.state == right.state
+        && left.pricing_version == right.pricing_version
 }
 
 fn effective_projection(snapshot: &UsageSnapshot) -> Result<u64, CostGuardError> {

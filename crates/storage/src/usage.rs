@@ -53,6 +53,17 @@ fn required_u64(
         .ok_or(StorageError::CorruptItem { entity, field })
 }
 
+fn required_bool(
+    item: &HashMap<String, AttributeValue>,
+    entity: &'static str,
+    field: &'static str,
+) -> Result<bool, StorageError> {
+    item.get(field)
+        .and_then(|value| value.as_bool().ok())
+        .copied()
+        .ok_or(StorageError::CorruptItem { entity, field })
+}
+
 fn operation_class_label(value: UsageOperationClass) -> &'static str {
     match value {
         UsageOperationClass::NewWorkflow => "new_workflow",
@@ -105,6 +116,16 @@ fn parse_reservation_state(value: &str) -> Result<UsageReservationState, Storage
             field: "state",
         }),
     }
+}
+
+fn same_logical_reservation(left: &UsageReservation, right: &UsageReservation) -> bool {
+    left.reservation_id == right.reservation_id
+        && left.workflow_id == right.workflow_id
+        && left.invoice_month == right.invoice_month
+        && left.operation_class == right.operation_class
+        && left.estimate_micro_inr == right.estimate_micro_inr
+        && left.state == right.state
+        && left.pricing_version == right.pricing_version
 }
 
 fn is_conditional_conflict(error: &TransactWriteItemsError) -> bool {
@@ -169,6 +190,69 @@ impl UsageRepository for DynamoDbStore {
         output.item().map(parse_snapshot).transpose()
     }
 
+    async fn initialize(
+        &self,
+        snapshot: &UsageSnapshot,
+    ) -> Result<ConditionalWriteOutcome, StorageError> {
+        let outcome = self
+            .client()
+            .put_item()
+            .table_name(self.table_name())
+            .item("pk", string_attr(partition_key(&snapshot.invoice_month)))
+            .item("sk", string_attr("AGGREGATE"))
+            .item("entity", string_attr(AGGREGATE_ENTITY))
+            .item(
+                "invoice_month",
+                string_attr(snapshot.invoice_month.as_str()),
+            )
+            .item("settled_micro_inr", number_attr(snapshot.settled_micro_inr))
+            .item(
+                "reserved_micro_inr",
+                number_attr(snapshot.reserved_micro_inr),
+            )
+            .item(
+                "reconciled_micro_inr",
+                number_attr(snapshot.reconciled_micro_inr),
+            )
+            .item(
+                "reconciliation_observed_at",
+                number_attr(snapshot.reconciliation_observed_at.as_unix_seconds()),
+            )
+            .item(
+                "attribution_complete",
+                AttributeValue::Bool(snapshot.attribution_complete),
+            )
+            .item(
+                "pricing_version",
+                string_attr(snapshot.pricing_version.as_str()),
+            )
+            .item(
+                "pricing_approval_id",
+                string_attr(snapshot.pricing_approval_id.as_str()),
+            )
+            .item(
+                "pricing_approved_at",
+                number_attr(snapshot.pricing_approved_at.as_unix_seconds()),
+            )
+            .item(
+                "optimistic_version",
+                number_attr(snapshot.optimistic_version),
+            )
+            .condition_expression("attribute_not_exists(pk) AND attribute_not_exists(sk)")
+            .send()
+            .await;
+        match outcome {
+            Ok(_) => Ok(ConditionalWriteOutcome::Committed),
+            Err(_) => match self.load(&snapshot.invoice_month).await? {
+                Some(existing) if existing == *snapshot => Ok(ConditionalWriteOutcome::Committed),
+                Some(_) => Ok(ConditionalWriteOutcome::Conflict),
+                None => Err(StorageError::Service {
+                    operation: "initialize usage aggregate",
+                }),
+            },
+        }
+    }
+
     async fn load_reservation(
         &self,
         month: &InvoiceMonth,
@@ -186,7 +270,7 @@ impl UsageRepository for DynamoDbStore {
             .load_usage_reservation(&reservation.invoice_month, &reservation.reservation_id)
             .await?
         {
-            return Ok(if existing == *reservation {
+            return Ok(if same_logical_reservation(&existing, reservation) {
                 ConditionalWriteOutcome::Committed
             } else {
                 ConditionalWriteOutcome::Conflict
@@ -263,11 +347,16 @@ impl UsageRepository for DynamoDbStore {
                 let existing = self
                     .load_usage_reservation(&reservation.invoice_month, &reservation.reservation_id)
                     .await?;
-                Ok(if existing.as_ref() == Some(reservation) {
-                    ConditionalWriteOutcome::Committed
-                } else {
-                    ConditionalWriteOutcome::Conflict
-                })
+                Ok(
+                    if existing
+                        .as_ref()
+                        .is_some_and(|stored| same_logical_reservation(stored, reservation))
+                    {
+                        ConditionalWriteOutcome::Committed
+                    } else {
+                        ConditionalWriteOutcome::Conflict
+                    },
+                )
             }
             Err(_) => Err(StorageError::Service {
                 operation: "reserve usage",
@@ -380,11 +469,16 @@ impl UsageRepository for DynamoDbStore {
                 let existing = self
                     .load_usage_reservation(&reservation.invoice_month, &reservation.reservation_id)
                     .await?;
-                Ok(if existing.as_ref() == Some(reservation) {
-                    ConditionalWriteOutcome::Committed
-                } else {
-                    ConditionalWriteOutcome::Conflict
-                })
+                Ok(
+                    if existing
+                        .as_ref()
+                        .is_some_and(|stored| same_logical_reservation(stored, reservation))
+                    {
+                        ConditionalWriteOutcome::Committed
+                    } else {
+                        ConditionalWriteOutcome::Conflict
+                    },
+                )
             }
             Err(_) => Err(StorageError::Service {
                 operation: "update usage reservation",
@@ -409,6 +503,35 @@ fn parse_snapshot(item: &HashMap<String, AttributeValue>) -> Result<UsageSnapsho
         settled_micro_inr: required_u64(item, AGGREGATE_ENTITY, "settled_micro_inr")?,
         reserved_micro_inr: required_u64(item, AGGREGATE_ENTITY, "reserved_micro_inr")?,
         reconciled_micro_inr: required_u64(item, AGGREGATE_ENTITY, "reconciled_micro_inr")?,
+        reconciliation_observed_at: WorkflowTimestamp::from_unix_seconds(required_u64(
+            item,
+            AGGREGATE_ENTITY,
+            "reconciliation_observed_at",
+        )?),
+        attribution_complete: required_bool(item, AGGREGATE_ENTITY, "attribution_complete")?,
+        pricing_version: StorageRecordId::new(required_string(
+            item,
+            AGGREGATE_ENTITY,
+            "pricing_version",
+        )?)
+        .map_err(|_| StorageError::CorruptItem {
+            entity: AGGREGATE_ENTITY,
+            field: "pricing_version",
+        })?,
+        pricing_approval_id: StorageRecordId::new(required_string(
+            item,
+            AGGREGATE_ENTITY,
+            "pricing_approval_id",
+        )?)
+        .map_err(|_| StorageError::CorruptItem {
+            entity: AGGREGATE_ENTITY,
+            field: "pricing_approval_id",
+        })?,
+        pricing_approved_at: WorkflowTimestamp::from_unix_seconds(required_u64(
+            item,
+            AGGREGATE_ENTITY,
+            "pricing_approved_at",
+        )?),
         optimistic_version: required_u64(item, AGGREGATE_ENTITY, "optimistic_version")?,
     })
 }
@@ -468,4 +591,30 @@ fn parse_reservation(
             "created_at",
         )?),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn delayed_reservation_replay_ignores_creation_timestamp() {
+        let original = UsageReservation {
+            reservation_id: StorageRecordId::new("reservation-01").expect("valid id"),
+            workflow_id: WorkflowId::new("workflow-01").expect("valid workflow"),
+            invoice_month: InvoiceMonth::new("2026-08").expect("valid month"),
+            operation_class: UsageOperationClass::NewWorkflow,
+            estimate_micro_inr: 5_000_000,
+            state: UsageReservationState::Reserved,
+            pricing_version: StorageRecordId::new("pricing-v1").expect("valid pricing"),
+            created_at: WorkflowTimestamp::from_unix_seconds(100),
+        };
+        let replay = UsageReservation {
+            created_at: WorkflowTimestamp::from_unix_seconds(200),
+            ..original.clone()
+        };
+        assert!(same_logical_reservation(&original, &replay));
+    }
 }
