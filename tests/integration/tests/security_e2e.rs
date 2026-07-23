@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use application::config::NormalizationConfig;
 use application::normalization::{self, NormalizationError};
 use domain::authorization::{
-    authorize_participant, AuthorizationError, LiveMembershipEvidence, MembershipStatus,
+    AuthorizationError, LiveMembershipEvidence, MembershipStatus, authorize_participant,
 };
 use domain::confirmation::PendingConfirmation;
 use domain::identity::{ChatId, ParticipantId};
