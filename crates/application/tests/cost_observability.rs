@@ -1,0 +1,461 @@
+#![allow(
+    clippy::expect_used,
+    clippy::indexing_slicing,
+    clippy::panic,
+    clippy::unwrap_used
+)]
+
+use std::fmt::{self, Display, Formatter};
+use std::sync::{Arc, Mutex};
+
+use application::cost_guard::{
+    CostGuardError, CostGuardService, OperationEnvelopeProvider, ReserveRequest, SettleMode,
+    SettleRequest, TimeProvider,
+};
+use application::observability::{
+    CostGuardFailureReason, CostGuardMetric, EnvironmentLabel, ManualReviewNotice,
+    ObservabilitySink, StageOutcome, StageProgress,
+};
+use application::ports::StorageRecordId;
+use application::repositories::{
+    ConditionalWriteOutcome, InvoiceMonth, UsageOperationClass, UsageRepository, UsageReservation,
+    UsageReservationState, UsageSnapshot,
+};
+use domain::identity::WorkflowId;
+use domain::workflow::{WorkflowStateKind, WorkflowTimestamp};
+use domain::{BudgetAuthorization, BudgetBand, BudgetDenialReason, BudgetThresholds};
+
+#[derive(Debug, Clone, Copy)]
+struct FixedEnvelope;
+
+impl OperationEnvelopeProvider for FixedEnvelope {
+    fn estimate(&self, operation_class: UsageOperationClass) -> Option<u64> {
+        Some(match operation_class {
+            UsageOperationClass::NewWorkflow => 5_000_000,
+            UsageOperationClass::Status => 1_000,
+            _ => 10_000_000,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct MissingEnvelope;
+
+impl OperationEnvelopeProvider for MissingEnvelope {
+    fn estimate(&self, _operation_class: UsageOperationClass) -> Option<u64> {
+        None
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FixedTime;
+
+impl TimeProvider for FixedTime {
+    fn now(&self) -> WorkflowTimestamp {
+        WorkflowTimestamp::from_unix_seconds(1_700_000_000)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FakeError;
+
+impl Display for FakeError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("fake usage error")
+    }
+}
+
+#[derive(Debug)]
+struct FakeUsageRepository {
+    snapshot: Mutex<Option<UsageSnapshot>>,
+    unavailable: Mutex<bool>,
+    write_outcome: Mutex<ConditionalWriteOutcome>,
+    reserved: Mutex<Vec<UsageReservation>>,
+    updated: Mutex<Vec<(UsageReservation, Option<u64>)>>,
+}
+
+impl FakeUsageRepository {
+    fn with_snapshot(snapshot: UsageSnapshot) -> Self {
+        Self {
+            snapshot: Mutex::new(Some(snapshot)),
+            unavailable: Mutex::new(false),
+            write_outcome: Mutex::new(ConditionalWriteOutcome::Committed),
+            reserved: Mutex::new(Vec::new()),
+            updated: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn uninitialized() -> Self {
+        Self {
+            snapshot: Mutex::new(None),
+            unavailable: Mutex::new(false),
+            write_outcome: Mutex::new(ConditionalWriteOutcome::Committed),
+            reserved: Mutex::new(Vec::new()),
+            updated: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl UsageRepository for FakeUsageRepository {
+    type Error = FakeError;
+
+    async fn load(&self, _month: &InvoiceMonth) -> Result<Option<UsageSnapshot>, Self::Error> {
+        if *self.unavailable.lock().unwrap() {
+            return Err(FakeError);
+        }
+        Ok(self.snapshot.lock().unwrap().clone())
+    }
+
+    async fn reserve(
+        &self,
+        _expected_version: u64,
+        reservation: &UsageReservation,
+    ) -> Result<ConditionalWriteOutcome, Self::Error> {
+        if *self.unavailable.lock().unwrap() {
+            return Err(FakeError);
+        }
+        let outcome = *self.write_outcome.lock().unwrap();
+        if outcome == ConditionalWriteOutcome::Committed {
+            self.reserved.lock().unwrap().push(reservation.clone());
+        }
+        Ok(outcome)
+    }
+
+    async fn update_reservation(
+        &self,
+        _expected_version: u64,
+        reservation: &UsageReservation,
+        trusted_measured_micro_inr: Option<u64>,
+    ) -> Result<ConditionalWriteOutcome, Self::Error> {
+        if *self.unavailable.lock().unwrap() {
+            return Err(FakeError);
+        }
+        let outcome = *self.write_outcome.lock().unwrap();
+        if outcome == ConditionalWriteOutcome::Committed {
+            self.updated
+                .lock()
+                .unwrap()
+                .push((reservation.clone(), trusted_measured_micro_inr));
+        }
+        Ok(outcome)
+    }
+}
+
+#[derive(Debug, Default)]
+struct RecordingSink {
+    metrics: Mutex<Vec<CostGuardMetric>>,
+    reviews: Mutex<Vec<ManualReviewNotice>>,
+    failures: Mutex<Vec<CostGuardFailureReason>>,
+    progress: Mutex<Vec<StageProgress>>,
+}
+
+impl ObservabilitySink for RecordingSink {
+    fn emit_cost_metric(&self, metric: &CostGuardMetric) {
+        self.metrics.lock().unwrap().push(metric.clone());
+    }
+
+    fn emit_stage_progress(&self, progress: &StageProgress) {
+        self.progress.lock().unwrap().push(progress.clone());
+    }
+
+    fn emit_manual_review(&self, notice: &ManualReviewNotice) {
+        self.reviews.lock().unwrap().push(notice.clone());
+    }
+
+    fn emit_cost_guard_failure(
+        &self,
+        _environment: &EnvironmentLabel,
+        _workflow_id: &WorkflowId,
+        reason: CostGuardFailureReason,
+    ) {
+        self.failures.lock().unwrap().push(reason);
+    }
+}
+
+fn month() -> InvoiceMonth {
+    InvoiceMonth::new("2026-08").expect("valid month")
+}
+
+fn workflow_id() -> WorkflowId {
+    WorkflowId::new("wf-cost-01").expect("valid workflow")
+}
+
+fn snapshot(settled: u64, reserved: u64, reconciled: u64) -> UsageSnapshot {
+    UsageSnapshot {
+        invoice_month: month(),
+        settled_micro_inr: settled,
+        reserved_micro_inr: reserved,
+        reconciled_micro_inr: reconciled,
+        optimistic_version: 7,
+    }
+}
+
+fn request(operation_class: UsageOperationClass) -> ReserveRequest {
+    ReserveRequest {
+        workflow_id: workflow_id(),
+        operation_class,
+        invoice_month: month(),
+        reservation_id: StorageRecordId::new("reservation-01").expect("valid reservation id"),
+        pricing_version: StorageRecordId::new("pricing-v1").expect("valid pricing version"),
+    }
+}
+
+fn thresholds() -> BudgetThresholds {
+    BudgetThresholds::new(240_000_000, 270_000_000, 300_000_000, 10_000_000)
+        .expect("valid thresholds")
+}
+
+fn service(sink: Arc<RecordingSink>) -> CostGuardService {
+    CostGuardService::new(
+        thresholds(),
+        0,
+        Arc::new(FixedEnvelope),
+        EnvironmentLabel::new("development").expect("valid environment"),
+        sink,
+        Arc::new(FixedTime),
+    )
+}
+
+fn reserved_usage() -> UsageReservation {
+    UsageReservation {
+        reservation_id: StorageRecordId::new("reservation-01").expect("valid reservation id"),
+        workflow_id: workflow_id(),
+        invoice_month: month(),
+        operation_class: UsageOperationClass::NewWorkflow,
+        estimate_micro_inr: 5_000_000,
+        state: UsageReservationState::Reserved,
+        pricing_version: StorageRecordId::new("pricing-v1").expect("valid pricing version"),
+        created_at: WorkflowTimestamp::from_unix_seconds(1_700_000_000),
+    }
+}
+
+#[tokio::test]
+async fn cost_observability_permits_and_persists_below_warning() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(10_000_000, 0, 0));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = service(Arc::clone(&sink))
+        .reserve(&repository, &request(UsageOperationClass::NewWorkflow))
+        .await
+        .expect("reservation succeeds");
+
+    assert_eq!(
+        outcome.decision.authorization(),
+        BudgetAuthorization::Permit
+    );
+    assert!(outcome.reservation.is_some());
+    assert_eq!(repository.reserved.lock().unwrap().len(), 1);
+    assert_eq!(sink.metrics.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn cost_observability_warns_at_80_percent_inclusive() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(235_000_000, 0, 0));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = service(sink)
+        .reserve(&repository, &request(UsageOperationClass::NewWorkflow))
+        .await
+        .expect("decision succeeds");
+
+    assert_eq!(outcome.decision.band(), BudgetBand::Warning);
+    assert!(outcome.decision.warning_crossed());
+    assert_eq!(
+        outcome.decision.authorization(),
+        BudgetAuthorization::Permit
+    );
+}
+
+#[tokio::test]
+async fn cost_observability_suspends_intake_at_90_percent_inclusive() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(265_000_000, 0, 0));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = service(sink)
+        .reserve(&repository, &request(UsageOperationClass::NewWorkflow))
+        .await
+        .expect("denial is a valid decision");
+
+    assert_eq!(outcome.decision.band(), BudgetBand::IntakeSuspended);
+    assert_eq!(
+        outcome.decision.authorization(),
+        BudgetAuthorization::Deny(BudgetDenialReason::IntakeSuspended)
+    );
+    assert!(outcome.reservation.is_none());
+    assert!(repository.reserved.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn cost_observability_denies_projection_equal_to_hard_cap() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(295_000_000, 0, 0));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = service(sink)
+        .reserve(&repository, &request(UsageOperationClass::NewWorkflow))
+        .await
+        .expect("denial is a valid decision");
+
+    assert_eq!(outcome.decision.band(), BudgetBand::HardCap);
+    assert_eq!(
+        outcome.decision.authorization(),
+        BudgetAuthorization::Deny(BudgetDenialReason::HardCapReached)
+    );
+    assert!(outcome.reservation.is_none());
+}
+
+#[tokio::test]
+async fn cost_observability_uses_higher_reconciled_projection() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(100_000_000, 0, 265_000_000));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = service(sink)
+        .reserve(&repository, &request(UsageOperationClass::NewWorkflow))
+        .await
+        .expect("decision succeeds");
+
+    assert_eq!(outcome.decision.band(), BudgetBand::IntakeSuspended);
+}
+
+#[tokio::test]
+async fn cost_observability_keeps_bounded_status_available_during_suspension() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(270_000_000, 0, 0));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = service(sink)
+        .reserve(&repository, &request(UsageOperationClass::Status))
+        .await
+        .expect("status decision succeeds");
+
+    assert_eq!(outcome.decision.band(), BudgetBand::IntakeSuspended);
+    assert_eq!(
+        outcome.decision.authorization(),
+        BudgetAuthorization::Permit
+    );
+}
+
+#[tokio::test]
+async fn cost_observability_fails_closed_when_usage_is_uninitialized() {
+    let repository = FakeUsageRepository::uninitialized();
+    let sink = Arc::new(RecordingSink::default());
+    let result = service(Arc::clone(&sink))
+        .reserve(&repository, &request(UsageOperationClass::NewWorkflow))
+        .await;
+
+    assert_eq!(result, Err(CostGuardError::UsageUninitialized));
+    assert_eq!(
+        sink.failures.lock().unwrap().as_slice(),
+        &[CostGuardFailureReason::UsageUninitialized]
+    );
+}
+
+#[tokio::test]
+async fn cost_observability_fails_closed_when_envelope_is_missing() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(0, 0, 0));
+    let sink = Arc::new(RecordingSink::default());
+    let service = CostGuardService::new(
+        thresholds(),
+        0,
+        Arc::new(MissingEnvelope),
+        EnvironmentLabel::new("staging").expect("valid environment"),
+        Arc::clone(&sink) as Arc<dyn ObservabilitySink>,
+        Arc::new(FixedTime),
+    );
+
+    let result = service
+        .reserve(&repository, &request(UsageOperationClass::NewWorkflow))
+        .await;
+    assert_eq!(result, Err(CostGuardError::InvalidEnvelope));
+    assert_eq!(
+        sink.failures.lock().unwrap().as_slice(),
+        &[CostGuardFailureReason::InvalidEnvelope]
+    );
+}
+
+#[tokio::test]
+async fn cost_observability_conditional_conflict_never_authorizes() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(0, 0, 0));
+    *repository.write_outcome.lock().unwrap() = ConditionalWriteOutcome::Conflict;
+    let sink = Arc::new(RecordingSink::default());
+    let result = service(Arc::clone(&sink))
+        .reserve(&repository, &request(UsageOperationClass::NewWorkflow))
+        .await;
+
+    assert_eq!(result, Err(CostGuardError::ConditionalConflict));
+    assert!(repository.reserved.lock().unwrap().is_empty());
+    assert_eq!(
+        sink.failures.lock().unwrap().as_slice(),
+        &[CostGuardFailureReason::ConditionalConflict]
+    );
+}
+
+#[tokio::test]
+async fn cost_observability_settlement_uses_server_side_reservation_amount() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(0, 5_000_000, 0));
+    let sink = Arc::new(RecordingSink::default());
+    let outcome = service(sink)
+        .settle(
+            &repository,
+            &SettleRequest {
+                reservation: reserved_usage(),
+                mode: SettleMode::Settled,
+            },
+        )
+        .await
+        .expect("settlement succeeds");
+
+    assert_eq!(outcome.reservation.state, UsageReservationState::Settled);
+    let updates = repository.updated.lock().unwrap();
+    assert_eq!(updates[0].0.state, UsageReservationState::Settled);
+    assert_eq!(updates[0].1, Some(5_000_000));
+}
+
+#[tokio::test]
+async fn cost_observability_manual_review_stays_reserved_and_emits_notice() {
+    let repository = FakeUsageRepository::with_snapshot(snapshot(0, 5_000_000, 0));
+    let sink = Arc::new(RecordingSink::default());
+    service(Arc::clone(&sink))
+        .mark_manual_review(&repository, &reserved_usage())
+        .await
+        .expect("manual review succeeds");
+
+    let updates = repository.updated.lock().unwrap();
+    assert_eq!(updates[0].0.state, UsageReservationState::ManualReview);
+    assert_eq!(updates[0].1, None);
+    assert_eq!(sink.reviews.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn cost_observability_json_is_redacted_and_workflow_is_not_a_metric_dimension() {
+    let metric = CostGuardMetric {
+        environment: EnvironmentLabel::new("production").expect("valid environment"),
+        workflow_id: workflow_id(),
+        operation_class: UsageOperationClass::AiCall,
+        band: BudgetBand::Warning,
+        outcome: application::observability::CostGuardOutcome::Permitted,
+        warning_crossed: true,
+        projected_micro_inr: 240_000_000,
+    };
+    let value = metric.to_json();
+    let serialized = value.to_string();
+    for forbidden in ["oauth", "token", "secret", "telegram", "document_content"] {
+        assert!(!serialized.to_ascii_lowercase().contains(forbidden));
+    }
+    let dimensions = &value["_aws"]["CloudWatchMetrics"][0]["Dimensions"][0];
+    assert!(
+        !dimensions
+            .as_array()
+            .expect("dimensions array")
+            .iter()
+            .any(|item| item == "workflow_id")
+    );
+    assert_eq!(value["workflow_id"], "wf-cost-01");
+    assert_eq!(value["Environment"], "production");
+}
+
+#[test]
+fn cost_observability_stage_progress_identifies_stage_and_outcome() {
+    let progress = StageProgress {
+        environment: EnvironmentLabel::new("development").expect("valid environment"),
+        workflow_id: workflow_id(),
+        stage: WorkflowStateKind::ExtractionCompleted,
+        outcome: StageOutcome::Completed,
+    };
+    let value = progress.to_json();
+    assert_eq!(value["stage"], "extraction_completed");
+    assert_eq!(value["outcome"], "completed");
+    assert_eq!(value["workflow_id"], "wf-cost-01");
+}
