@@ -54,6 +54,13 @@ jobs:
         with:
           tool: cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7
       - run: cargo fmt --all -- --check
+      - name: Workspace dependency centralization
+        run: python3 scripts/check-workspace-deps.py
+      - name: Unused dependency audit (cargo-machete)
+        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        with:
+          tool: cargo-machete@0.9.2
+      - run: cargo machete --with-metadata --skip-target-dir .
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
       - name: Start credential-free local sandbox
         run: |

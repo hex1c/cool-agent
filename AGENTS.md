@@ -80,3 +80,19 @@ For Rust projects:
   insufficient. Use `rust_log` to query specific failures.
 * Run the narrowest relevant test first instead of repeatedly running the full
   workspace test suite.
+
+Rust workspace dependencies:
+
+* Declare every shared dependency version ONCE in the root `Cargo.toml`
+  `[workspace.dependencies]` table. This is the single source of truth for
+  versions, features, and path crates across the workspace.
+* In member crates, reference workspace-managed deps with
+  `dep.workspace = true` (add per-crate `features` inline when needed:
+  `tokio = { workspace = true, features = ["rt-multi-thread"] }`).
+* Do NOT re-declare inline `version = "..."` for any dependency that already
+  exists in `[workspace.dependencies]`.
+* `scripts/check-workspace-deps.py` enforces this and runs in CI; run it
+  locally after touching any `Cargo.toml`.
+* Trim unused dependencies with `cargo machete --with-metadata .` and remove
+  only genuinely-unused deps (verify with `cargo check` / tests — machete is
+  imprecise and produces false positives for macro-driven crates).

@@ -1543,7 +1543,6 @@ dependencies = [
  "serde",
  "serde_json",
  "subtle",
- "thiserror",
 ]
 
 [[package]]

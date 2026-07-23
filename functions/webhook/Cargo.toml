@@ -1,27 +1,17 @@
 [package]
 name = "webhook-function"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.97"
-publish = false
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [dependencies]
-lambda_runtime = "0.14"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1.43", features = ["macros", "rt-multi-thread"] }
-telegram = { path = "../../crates/telegram" }
-domain = { path = "../../crates/domain" }
+lambda_runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+telegram.workspace = true
+domain.workspace = true
 
-[lints.rust]
-unsafe_code = "deny"
-warnings = "deny"
-
-[lints.clippy]
-all = "deny"
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-todo = "deny"
-unimplemented = "deny"
-"indexing_slicing" = "deny"
+[lints]
+workspace = true

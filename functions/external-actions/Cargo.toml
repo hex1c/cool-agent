@@ -1,37 +1,26 @@
 [package]
 name = "external-actions-functions"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.97"
-publish = false
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [dependencies]
-lambda_runtime = "0.14"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-sha2 = "=0.11.0"
-hex = "0.4"
-tokio = { version = "1.43", features = ["macros", "rt-multi-thread"] }
-application = { path = "../../crates/application" }
-google = { path = "../../crates/google" }
-email = { path = "../../crates/email" }
-domain = { path = "../../crates/domain" }
+lambda_runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+application.workspace = true
+google.workspace = true
+email.workspace = true
+domain.workspace = true
 
 [dev-dependencies]
-google = { path = "../../crates/google", features = ["test-utils"] }
-email = { path = "../../crates/email", features = ["test-utils"] }
-domain = { path = "../../crates/domain", features = ["test-utils"] }
-tokio = { version = "1", features = ["macros", "rt"] }
+google = { workspace = true, features = ["test-utils"] }
+email = { workspace = true, features = ["test-utils"] }
+domain = { workspace = true, features = ["test-utils"] }
+tokio.workspace = true
 
-[lints.rust]
-unsafe_code = "deny"
-warnings = "deny"
-
-[lints.clippy]
-all = "deny"
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-todo = "deny"
-unimplemented = "deny"
-"indexing_slicing" = "deny"
+[lints]
+workspace = true

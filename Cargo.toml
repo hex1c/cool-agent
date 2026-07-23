@@ -20,6 +20,45 @@ rust-version = "1.97"
 license = "UNLICENSED"
 publish = false
 
+[workspace.dependencies]
+# Internal crates.
+application = { path = "crates/application", version = "0.1.0" }
+domain = { path = "crates/domain", version = "0.1.0" }
+email = { path = "crates/email", version = "0.1.0" }
+google = { path = "crates/google", version = "0.1.0" }
+oauth = { path = "crates/oauth", version = "0.1.0" }
+pdf = { path = "crates/pdf", version = "0.1.0" }
+storage = { path = "crates/storage", version = "0.1.0" }
+telegram = { path = "crates/telegram", version = "0.1.0" }
+webhook-function = { path = "functions/webhook", version = "0.1.0" }
+
+# External crates. Version source of truth for the whole workspace.
+aws-sdk-dynamodb = { version = "=1.117.0", features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "=1.138.1", features = ["behavior-version-latest"] }
+aws-sdk-sfn = { version = "=1.110.0", features = ["behavior-version-latest"] }
+aws-sdk-ssm = { version = "=1.116.0", features = ["behavior-version-latest"] }
+base64 = "0.22"
+getrandom = { version = "0.2", features = ["std"] }
+hex = "0.4"
+hmac = "=0.13.0"
+jsonschema = "0.47"
+lambda_runtime = "0.14"
+printpdf = "=0.11.3"
+rand = "0.8"
+regex = "1.13"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+sha2 = "=0.11.0"
+subtle = "2"
+thiserror = "2"
+time = { version = "0.3.54", features = ["parsing"] }
+tokio = { version = "1.53", features = ["macros", "rt"] }
+url = "2"
+uuid = { version = "1.23", features = ["v4"] }
+zeroize = "1.9"
+
 [workspace.lints.rust]
 unsafe_code = "deny"
 warnings = "deny"
