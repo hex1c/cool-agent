@@ -11,6 +11,7 @@ members = [
   "crates/pdf",
   "tests/integration",
   "functions/external-actions",
+  "functions/webhook",
 ]
 
 [workspace.package]
@@ -29,10 +30,12 @@ oauth = { path = "crates/oauth", version = "0.1.0" }
 pdf = { path = "crates/pdf", version = "0.1.0" }
 storage = { path = "crates/storage", version = "0.1.0" }
 telegram = { path = "crates/telegram", version = "0.1.0" }
+webhook-function = { path = "functions/webhook", version = "0.1.0" }
 
 # External crates. Version source of truth for the whole workspace.
 aws-sdk-dynamodb = { version = "=1.117.0", features = ["behavior-version-latest"] }
 aws-sdk-s3 = { version = "=1.138.1", features = ["behavior-version-latest"] }
+aws-sdk-sfn = { version = "=1.110.0", features = ["behavior-version-latest"] }
 aws-sdk-ssm = { version = "=1.116.0", features = ["behavior-version-latest"] }
 base64 = "0.22"
 getrandom = { version = "0.2", features = ["std"] }
@@ -43,6 +46,7 @@ lambda_runtime = "0.14"
 printpdf = "=0.11.3"
 rand = "0.8"
 regex = "1.13"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"

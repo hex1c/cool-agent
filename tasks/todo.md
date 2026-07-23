@@ -1196,14 +1196,14 @@ DynamoDB, S3, Parameter Store/KMS, and Step Functions resources.
 
 **Acceptance criteria:**
 
-- [ ] Every handler has an explicit runtime, artifact, timeout, memory limit, and event contract.
-- [ ] Tables, buckets, secrets, state machines, webhook/OAuth endpoints, and outputs are explicit.
-- [ ] `sam validate --lint` and `sam build` package every function deterministically.
+- [x] Every handler has an explicit runtime, artifact, timeout, memory limit, and event contract.
+- [x] Tables, buckets, secrets, state machines, webhook/OAuth endpoints, and outputs are explicit.
+- [x] `sam validate --lint` and `sam build` package every function deterministically.
 
 **Verification:**
 
-- [ ] Validation/build pass: `sam validate --lint --template-file infrastructure/template.yaml && sam build --template-file infrastructure/template.yaml`
-- [ ] Packaging check: generated artifacts contain every expected handler.
+- [x] Validation/build pass: `sam validate --lint --template-file infrastructure/template.yaml && sam build --template-file infrastructure/template.yaml`
+- [x] Packaging check: generated artifacts contain every expected handler.
 
 **Dependencies:** Tasks 3, 11A, 20-25, 29-30, 32-38
 
@@ -1223,14 +1223,14 @@ strict environment-isolation controls to the core SAM resources.
 
 **Acceptance criteria:**
 
-- [ ] Dev, staging, and production resource names and mutable data cannot cross-reference each other.
-- [ ] Functions access only their required tables, prefixes, secrets, and state-machine actions.
-- [ ] Each isolated budget-control resource follows the approved consistency, attribution, and fail-closed ADR.
+- [x] Dev, staging, and production resource names and mutable data cannot cross-reference each other.
+- [x] Functions access only their required tables, prefixes, secrets, and state-machine actions.
+- [x] Each isolated budget-control resource follows the approved consistency, attribution, and fail-closed ADR.
 
 **Verification:**
 
-- [ ] Security check: generated IAM policies receive human review.
-- [ ] Validation passes for dev, staging, and production parameter sets.
+- [x] Security check: generated IAM policies receive human review.
+- [x] Validation passes for dev, staging, and production parameter sets.
 
 **Dependencies:** Tasks 8, 39
 
@@ -1251,14 +1251,14 @@ LocalStack, mock SMTP, and fake provider services using seeded sanitized data.
 
 **Acceptance criteria:**
 
-- [ ] Sandbox starts without cloud credentials and contains no real secret/customer data.
-- [ ] Webhook, conditional write, S3, wait/resume, OAuth, Google, SMTP, and AI mock paths are exercisable.
-- [ ] Documentation states local parity limits and staging responsibilities.
+- [x] Sandbox starts without cloud credentials and contains no real secret/customer data.
+- [x] Webhook, conditional write, S3, wait/resume, OAuth, Google, SMTP, and AI mock paths are exercisable.
+- [x] Documentation states local parity limits and staging responsibilities.
 
 **Verification:**
 
-- [ ] Start succeeds: `docker compose -f infrastructure/local/docker-compose.yaml up -d`
-- [ ] Tests pass: `cargo test --test local_sandbox --features integration`
+- [x] Start succeeds: `docker compose -f infrastructure/local/docker-compose.yaml up -d`
+- [x] Tests pass: `cargo test --test local_sandbox --features integration`
 
 **Dependencies:** Tasks 20-25, 30-39A
 
