@@ -1546,8 +1546,6 @@ dependencies = [
 name = "pdf"
 version = "0.1.0"
 dependencies = [
- "application",
- "domain",
  "printpdf",
  "serde",
  "serde_json",

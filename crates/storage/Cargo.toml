@@ -10,23 +10,21 @@ publish.workspace = true
 integration = []
 
 [dependencies]
-aws-sdk-dynamodb = { version = "=1.117.0", features = [
-  "behavior-version-latest",
-] }
-aws-sdk-s3 = { version = "=1.138.1", features = ["behavior-version-latest"] }
-aws-sdk-ssm = { version = "=1.116.0", features = ["behavior-version-latest"] }
-domain = { path = "../domain" }
-application = { path = "../application" }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-sha2 = "=0.11.0"
-base64 = "0.22"
-hmac = "=0.13.0"
-regex = "1.13"
-uuid = { version = "1.23", features = ["v4"] }
+aws-sdk-dynamodb.workspace = true
+aws-sdk-s3.workspace = true
+aws-sdk-ssm.workspace = true
+application.workspace = true
+domain.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+base64.workspace = true
+hmac.workspace = true
+regex.workspace = true
+uuid.workspace = true
 
 [dev-dependencies]
-tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [lints]
 workspace = true

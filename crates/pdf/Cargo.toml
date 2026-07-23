@@ -7,15 +7,10 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
-domain = { path = "../domain" }
-application = { path = "../application" }
-printpdf = "=0.11.3"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "2"
-
-[dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+printpdf.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
 
 [lints]
 workspace = true

@@ -10,16 +10,14 @@ publish.workspace = true
 test-utils = []
 
 [dependencies]
-domain = { path = "../domain" }
-application = { path = "../application" }
-thiserror = "2"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-zeroize = "1"
+application.workspace = true
+domain.workspace = true
+thiserror.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
-domain = { path = "../domain", features = ["test-utils"] }
-tokio = { version = "1", features = ["macros", "rt"] }
+domain = { workspace = true, features = ["test-utils"] }
+tokio.workspace = true
 
 [lints]
 workspace = true
