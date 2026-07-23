@@ -48,3 +48,9 @@ googleoauth
 Thumbs.db
 *:Zone.Identifier
 temp/
+.selftest-tmp/
+
+# ── Graphify artifacts (local knowledge-graph output) ───────────────────
+graphify-out/
+# ── pi agent logs (nested workspaces) ───────────────────────────────────
+**/.pi/

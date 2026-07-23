@@ -1315,15 +1315,15 @@ first and real development/staging providers where required.
 
 **Acceptance criteria:**
 
-- [ ] Coverage includes OAuth, topic isolation, concurrent sessions, all inputs, quotation, Calendar, email, retries, history, and cost suspension.
-- [ ] Security cases cover malformed documents, stale callbacks, removed participants, secret redaction, and presigned-link expiry.
-- [ ] Each PRD success criterion links to an automated test or explicit manual evidence.
+- [x] Coverage includes OAuth, topic isolation, concurrent sessions, all inputs, quotation, Calendar, email, retries, history, and cost suspension.
+- [x] Security cases cover malformed documents, stale callbacks, removed participants, secret redaction, and presigned-link expiry.
+- [x] Each PRD success criterion links to an automated test or explicit manual evidence.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test --workspace --all-features`
-- [ ] Tests pass: `pnpm --filter @novus/agent-harness test --run`
-- [ ] Manual check: `docs/verification/prd-traceability.md` has no uncovered criterion.
+- [x] Tests pass: `cargo test --workspace --all-features`
+- [x] Tests pass: `pnpm --filter @novus/agent-harness test --run`
+- [x] Manual check: `docs/verification/prd-traceability.md` has no uncovered criterion.
 
 **Dependencies:** Infrastructure Ready checkpoint, Tasks 33-41
 
@@ -1344,13 +1344,13 @@ configuration, tests, SAM build, approval, and rollback readiness.
 
 **Acceptance criteria:**
 
-- [ ] Deployment fails on any required check, skipped critical test, insufficient budget margin, missing asset, or missing approval.
-- [ ] Staging/production require explicit environment selection and cannot share mutable resources.
-- [ ] Rollback steps preserve durable workflow/history data and restore the previous known-good artifact/config.
+- [x] Deployment fails on any required check, skipped critical test, insufficient budget margin, missing asset, or missing approval.
+- [x] Staging/production require explicit environment selection and cannot share mutable resources.
+- [x] Rollback steps preserve durable workflow/history data and restore the previous known-good artifact/config.
 
 **Verification:**
 
-- [ ] Manual check: deliberately fail each gate and confirm deployment is blocked.
+- [x] Manual check: deliberately fail each gate and confirm deployment is blocked.
 - [ ] Human approves `docs/deployment/runbook.md`.
 
 **Dependencies:** Tasks 8, 13, 39-42
