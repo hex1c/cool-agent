@@ -9,6 +9,7 @@
 //! S3, SSM, Step Functions seeded wait/resume, Telegram webhook intake and API
 //! calls, OAuth, Google, SMTP, and AI.
 
+use std::collections::HashMap;
 use std::error::Error;
 use std::io::{Error as IoError, ErrorKind};
 use std::net::{SocketAddr, TcpStream as StdTcpStream};
@@ -23,11 +24,11 @@ use aws_sdk_sfn::types::ExecutionStatus;
 use aws_sdk_ssm::config::{Credentials as SsmCredentials, Region as SsmRegion};
 use reqwest::{Client, StatusCode, redirect::Policy};
 use serde_json::{Value, json};
-use telegram::{WebhookVerifier, normalize};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 use tokio::time::{sleep, timeout};
 use uuid::Uuid;
+use webhook_function::{ApiGatewayEvent, WebhookResponse, WebhookVerifier, process_webhook};
 
 const APPLICATION_TABLE: &str = "novus-development-application";
 const ARTIFACT_BUCKET: &str = "novus-development-artifacts-local";
@@ -429,12 +430,23 @@ async fn local_sandbox_exercises_seeded_aws_and_provider_paths() -> Result<(), B
         .parameter()
         .and_then(|parameter| parameter.value())
         .ok_or_else(|| IoError::other("seeded webhook secret has no value"))?;
-    WebhookVerifier::new(webhook_secret.to_owned())
-        .verify(Some("local-webhook-secret-not-real"))?;
-    let normalized = normalize::normalize(include_bytes!(
-        "../../../tests/fixtures/telegram/mention.json"
-    ))?;
-    assert_eq!(normalized.update_id, 1001);
+    let webhook_event = ApiGatewayEvent {
+        headers: HashMap::from([(
+            "x-telegram-bot-api-secret-token".to_owned(),
+            "local-webhook-secret-not-real".to_owned(),
+        )]),
+        body: Some(include_str!("../../../tests/fixtures/telegram/mention.json").to_owned()),
+    };
+    let webhook_response = process_webhook(
+        &webhook_event,
+        &WebhookVerifier::new(webhook_secret.to_owned()),
+    );
+    let WebhookResponse::Accepted(accepted) = webhook_response else {
+        return Err(IoError::other("seeded webhook intake was not accepted").into());
+    };
+    assert_eq!(accepted.update_id, 1001);
+    assert_eq!(accepted.route, "forum_topic");
+    assert_eq!(accepted.event_kind, "mention");
 
     let mocks: Value = serde_json::from_str(include_str!(
         "../../../infrastructure/local/mock-providers.json"

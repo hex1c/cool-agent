@@ -11,6 +11,7 @@ members = [
   "crates/pdf",
   "tests/integration",
   "functions/external-actions",
+  "functions/webhook",
 ]
 
 [workspace.package]
