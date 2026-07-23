@@ -1,0 +1,103 @@
+# Local AWS sandbox for the Novus Telegram Operations Worker (Task 40).
+#
+# Credential-free, sanitized local environment for fast feedback. Combines
+# DynamoDB Local, LocalStack (S3 + SSM), Step Functions Local, a mock SMTP
+# server (MailHog), and a fake HTTP provider for Telegram, Google, and the AI
+# extraction model. No real secret or customer data is present.
+#
+# Start:   docker compose -f infrastructure/local/docker-compose.yaml up -d
+# Seed:    bash infrastructure/local/init.sh
+# Stop:    docker compose -f infrastructure/local/docker-compose.yaml down -v
+#
+# See docs/development/local-sandbox.md for parity limits and staging
+# responsibilities.
+
+services:
+  dynamodb-local:
+    image: amazon/dynamodb-local:3.3.0
+    command: -jar DynamoDBLocal.jar -inMemory -sharedDb
+    ports:
+      - "8000:8000"
+
+  localstack:
+    # Last unauthenticated release line. Current 2026 images require a
+    # LocalStack account token, which would violate the credential-free sandbox.
+    image: localstack/localstack:4.14.0
+    environment:
+      SERVICES: s3,ssm
+      DEFAULT_REGION: us-east-1
+    ports:
+      - "4566:4566"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:4566/_localstack/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  stepfunctions-local:
+    image: amazon/aws-stepfunctions-local:latest
+    depends_on:
+      - dynamodb-local
+    ports:
+      - "8083:8083"
+    environment:
+      # Disable the local Lambda executor; wait/resume-with-Lambda live runs
+      # are deferred to Task 42 E2E suites. The service stays exercisable for
+      # state-machine create/start/describe and Wait-state executions.
+      LAMBDA_EXECUTOR: ""
+      DDB_ENDPOINT: http://dynamodb-local:8000
+
+  mailhog:
+    # Mock SMTP server. SMTP on 1025, API/UI on 8025.
+    image: mailhog/mailhog:v1.0.1
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+
+  mock-providers:
+    # Fake HTTP provider for Telegram Bot API, Google OAuth/Drive/Calendar, and
+    # the AI extraction model. Serves seeded sanitized responses from
+    # mock-providers.json via mock_server.py. No real upstream calls are made.
+    image: python:3.12-slim
+    command: python /app/mock_server.py /app/mock-providers.json 8081
+    working_dir: /app
+    volumes:
+      - ./mock_server.py:/app/mock_server.py:ro
+      - ./mock-providers.json:/app/mock-providers.json:ro
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')",
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+
+  sandbox-init:
+    image: amazon/aws-cli:2.27.49
+    entrypoint: ["/bin/sh", "/app/init.sh"]
+    depends_on:
+      dynamodb-local:
+        condition: service_started
+      localstack:
+        condition: service_healthy
+      stepfunctions-local:
+        condition: service_started
+    environment:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      DYNAMODB_ENDPOINT: http://dynamodb-local:8000
+      LOCALSTACK_ENDPOINT: http://localstack:4566
+      STEPFUNCTIONS_ENDPOINT: http://stepfunctions-local:8083
+      APPLICATION_TABLE: novus-development-application
+      BUDGET_TABLE: novus-development-budget
+      ARTIFACT_BUCKET: novus-development-artifacts-local
+    volumes:
+      - ./init.sh:/app/init.sh:ro
+    restart: "no"
