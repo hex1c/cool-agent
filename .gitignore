@@ -41,6 +41,7 @@ telpass
 googleoauth
 *.pem
 .env*
+!.env.example
 .credentials/
 
 # ── OS / filesystem ──────────────────────────────────────────────────────
