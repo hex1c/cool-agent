@@ -21,7 +21,7 @@ services:
       retries: 30
 
   stepfunctions-local:
-    image: amazon/stepfunctions-local:latest
+    image: amazon/aws-stepfunctions-local:latest
     depends_on:
       - dynamodb-local
     ports:

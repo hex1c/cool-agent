@@ -96,14 +96,14 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
-        - AttributeName: PK
+        - AttributeName: pk
           AttributeType: S
-        - AttributeName: SK
+        - AttributeName: sk
           AttributeType: S
       KeySchema:
-        - AttributeName: PK
+        - AttributeName: pk
           KeyType: HASH
-        - AttributeName: SK
+        - AttributeName: sk
           KeyType: RANGE
       Tags:
         - { Key: novus:environment, Value: !Ref EnvironmentName }
@@ -119,14 +119,14 @@ Resources:
       SSESpecification:
         SSEEnabled: true
       AttributeDefinitions:
-        - AttributeName: PK
+        - AttributeName: pk
           AttributeType: S
-        - AttributeName: SK
+        - AttributeName: sk
           AttributeType: S
       KeySchema:
-        - AttributeName: PK
+        - AttributeName: pk
           KeyType: HASH
-        - AttributeName: SK
+        - AttributeName: sk
           KeyType: RANGE
       Tags:
         - { Key: novus:environment, Value: !Ref EnvironmentName }

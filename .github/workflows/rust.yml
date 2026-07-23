@@ -23,6 +23,7 @@ jobs:
               - 'crates/**'
               - 'functions/**'
               - 'tests/**'
+              - 'infrastructure/local/**'
               - 'Cargo.toml'
               - 'Cargo.lock'
               - '.github/workflows/rust.yml'
@@ -54,6 +55,16 @@ jobs:
           tool: cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Start credential-free local sandbox
+        run: |
+          set -euo pipefail
+          compose_file=infrastructure/local/docker-compose.yaml
+          docker compose -f "$compose_file" up -d
+          init_id=$(docker compose -f "$compose_file" ps --all --quiet sandbox-init)
+          test -n "$init_id"
+          init_status=$(docker wait "$init_id")
+          docker logs "$init_id"
+          test "$init_status" = 0
       - run: cargo nextest run --workspace --all-features
       - run: cargo build --workspace --all-features
       - name: Collect coverage
@@ -77,3 +88,6 @@ jobs:
             exit 0
           fi
           python3 .github/scripts/coverage-summary.py coverage.lcov "${CHANGED[@]}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Stop local sandbox
+        if: always()
+        run: docker compose -f infrastructure/local/docker-compose.yaml down -v
