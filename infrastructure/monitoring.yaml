@@ -1,0 +1,242 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Environment-scoped alarms for Novus workflow failures, ambiguous operations,
+  budget enforcement, and edge error rates (Task 41).
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    AllowedValues: [development, staging, production]
+  QuotationStateMachineArn:
+    Type: String
+  CalendarStateMachineArn:
+    Type: String
+  EmailStateMachineArn:
+    Type: String
+
+Resources:
+  BudgetWarningAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-budget-warning"
+      Namespace: Novus/Operations
+      MetricName: ProjectedMonthlyCostMicroInr
+      Dimensions:
+        - Name: Environment
+          Value: !Ref EnvironmentName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 240000000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  BudgetSuspensionAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-budget-suspension"
+      Namespace: Novus/Operations
+      MetricName: ProjectedMonthlyCostMicroInr
+      Dimensions:
+        - Name: Environment
+          Value: !Ref EnvironmentName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 270000000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  BudgetHardCapAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-budget-hard-cap"
+      Namespace: Novus/Operations
+      MetricName: ProjectedMonthlyCostMicroInr
+      Dimensions:
+        - Name: Environment
+          Value: !Ref EnvironmentName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 300000000
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  BudgetMetricStaleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-budget-metric-stale"
+      Namespace: Novus/Operations
+      MetricName: ProjectedMonthlyCostMicroInr
+      Dimensions:
+        - Name: Environment
+          Value: !Ref EnvironmentName
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 0
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: breaching
+
+  CostGuardFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-cost-guard-failure"
+      Namespace: Novus/Operations
+      MetricName: CostGuardFailureCount
+      Dimensions:
+        - Name: Environment
+          Value: !Ref EnvironmentName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  ManualReviewAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-manual-review"
+      Namespace: Novus/Operations
+      MetricName: ManualReviewCount
+      Dimensions:
+        - Name: Environment
+          Value: !Ref EnvironmentName
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  QuotationExecutionFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-quotation-execution-failure"
+      Namespace: AWS/States
+      MetricName: ExecutionsFailed
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref QuotationStateMachineArn
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  CalendarExecutionFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-calendar-execution-failure"
+      Namespace: AWS/States
+      MetricName: ExecutionsFailed
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref CalendarStateMachineArn
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  EmailExecutionFailureAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-email-execution-failure"
+      Namespace: AWS/States
+      MetricName: ExecutionsFailed
+      Dimensions:
+        - Name: StateMachineArn
+          Value: !Ref EmailStateMachineArn
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+
+  WebhookErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-webhook-error-rate"
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Metrics:
+        - Id: webhookErrors
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: Novus/Edge
+              MetricName: WebhookErrorCount
+              Dimensions:
+                - Name: Environment
+                  Value: !Ref EnvironmentName
+            Period: 300
+            Stat: Sum
+        - Id: webhookInvocations
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: Novus/Edge
+              MetricName: WebhookRequestCount
+              Dimensions:
+                - Name: Environment
+                  Value: !Ref EnvironmentName
+            Period: 300
+            Stat: Sum
+        - Id: webhookErrorRate
+          Label: Webhook error rate percent
+          Expression: IF(webhookInvocations>0,100*webhookErrors/webhookInvocations,0)
+          ReturnData: true
+
+  OAuthErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "novus-${EnvironmentName}-oauth-error-rate"
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      Metrics:
+        - Id: oauthErrors
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: Novus/Edge
+              MetricName: OAuthErrorCount
+              Dimensions:
+                - Name: Environment
+                  Value: !Ref EnvironmentName
+            Period: 300
+            Stat: Sum
+        - Id: oauthInvocations
+          ReturnData: false
+          MetricStat:
+            Metric:
+              Namespace: Novus/Edge
+              MetricName: OAuthRequestCount
+              Dimensions:
+                - Name: Environment
+                  Value: !Ref EnvironmentName
+            Period: 300
+            Stat: Sum
+        - Id: oauthErrorRate
+          Label: OAuth error rate percent
+          Expression: IF(oauthInvocations>0,100*oauthErrors/oauthInvocations,0)
+          ReturnData: true
+
+Outputs:
+  BudgetWarningAlarmArn:
+    Value: !GetAtt BudgetWarningAlarm.Arn
+  BudgetSuspensionAlarmArn:
+    Value: !GetAtt BudgetSuspensionAlarm.Arn
+  BudgetHardCapAlarmArn:
+    Value: !GetAtt BudgetHardCapAlarm.Arn
+  ManualReviewAlarmArn:
+    Value: !GetAtt ManualReviewAlarm.Arn

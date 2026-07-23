@@ -217,7 +217,7 @@ Step Functions, local sandbox, observability, cost guard, E2E, deployment gates
 - [x] Task 39: Define core SAM resources and function packaging
 - [x] Task 39A: Add IAM and isolated environment controls
 - [x] Task 40: Complete the local AWS sandbox
-- [ ] Task 41: Implement cost enforcement and observability
+- [x] Task 41: Implement cost enforcement and observability
 
 ### Checkpoint: Infrastructure Ready
 

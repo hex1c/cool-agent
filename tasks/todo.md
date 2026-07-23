@@ -1279,14 +1279,14 @@ redacted logs, alarms, and stage progress to all critical workflow paths.
 
 **Acceptance criteria:**
 
-- [ ] Application counters warn at 80%, suspend intake at 90%, and prevent projected cap breach across environments.
-- [ ] Metrics/logs identify workflow/stage/outcome without secrets, OAuth data, or raw document content.
-- [ ] Alarms cover failures, manual-review ambiguity, cost thresholds, and webhook/OAuth error rates.
+- [x] Application counters warn at 80%, suspend intake at 90%, and prevent projected cap breach across environments.
+- [x] Metrics/logs identify workflow/stage/outcome without secrets, OAuth data, or raw document content.
+- [x] Alarms cover failures, manual-review ambiguity, cost thresholds, and webhook/OAuth error rates.
 
 **Verification:**
 
-- [ ] Tests pass: `cargo test -p application cost_observability`
-- [ ] Manual check: injected thresholds produce expected metrics, notices, and intake behavior.
+- [x] Tests pass: `cargo test -p application cost_observability`
+- [x] Manual check: injected thresholds produce expected metrics, notices, and intake behavior (recorded in `docs/development/cost-observability.md`).
 
 **Dependencies:** Tasks 8, 18, 20, 38-40, including Task 39A
 

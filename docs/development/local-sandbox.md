@@ -50,7 +50,8 @@ Endpoint overrides supported by `local_sandbox.rs` are
 `sandbox-init` creates:
 
 - `novus-development-application` and `novus-development-budget` tables with
-  lowercase `pk`/`sk` keys matching the Rust storage adapters;
+  lowercase `pk`/`sk` keys matching the Rust storage adapters, including an
+  idempotently seeded current-month zero usage aggregate;
 - `novus-development-artifacts-local` with one sanitized history object;
 - fake development SSM parameters under `/novus/development/`;
 - a successful one-second `novus-local-wait-resume` Step Functions execution.

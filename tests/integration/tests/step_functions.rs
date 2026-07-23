@@ -156,7 +156,20 @@ fn ambiguous_routes_to_manual_review(asl: &Value) -> bool {
             let target = state_map
                 .get(next)
                 .unwrap_or_else(|| panic!("ambiguous target {next} must exist"));
-            target.get("Type").and_then(Value::as_str).unwrap_or("") == "Fail"
+            if target.get("Type").and_then(Value::as_str).unwrap_or("") == "Fail" {
+                return true;
+            }
+            let is_manual_review_guard = target["Parameters"]["Payload"]["action"]
+                .as_str()
+                .is_some_and(|action| action == "manual_review");
+            let guarded_target = target
+                .get("Next")
+                .and_then(Value::as_str)
+                .and_then(|name| state_map.get(name));
+            is_manual_review_guard
+                && guarded_target.is_some_and(|guarded| {
+                    guarded.get("Type").and_then(Value::as_str) == Some("Fail")
+                })
         })
     })
 }
@@ -301,6 +314,35 @@ fn all_workflows_have_catch_all_on_external_actions() {
                     );
                 }
             }
+        }
+    }
+}
+
+#[test]
+fn cost_guard_gates_intake_ai_and_external_writes() {
+    for (name, file) in WORKFLOWS {
+        let asl = load_asl(file);
+        let serialized = asl.to_string();
+        for required in [
+            "${CostGuardFunction}",
+            "${CostGuardIntakeFunction}",
+            "${CostGuardAiFunction}",
+            "${CostGuardExternalFunction}",
+            "ReserveIntakeBudget",
+            "CheckIntakeBudget",
+            "ReserveAiBudget",
+            "CheckAiBudget",
+            "BudgetDenied",
+            "BudgetGuardUnavailable",
+            "SettleAiBudget",
+            "SettleIntakeBudget",
+            "manual_review",
+            "settle",
+        ] {
+            assert!(
+                serialized.contains(required),
+                "{name}: missing cost guard path {required}"
+            );
         }
     }
 }

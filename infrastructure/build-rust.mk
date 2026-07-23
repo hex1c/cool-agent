@@ -17,9 +17,10 @@
 
 CARGO_LAMBDA ?= cargo lambda
 RUST_BUILD_FLAGS ?= --release --x86-64 --output-format binary
+SAM_CARGO_TARGET_DIR ?= $(abspath $(ARTIFACTS_DIR)/../cargo-target)
 
 define cargo-lambda-bin
-	cd $(2) && $(CARGO_LAMBDA) build $(RUST_BUILD_FLAGS) --lambda-dir "$(ARTIFACTS_DIR).clstage" --bin $(1)
+	cd $(2) && CARGO_TARGET_DIR="$(SAM_CARGO_TARGET_DIR)" $(CARGO_LAMBDA) build $(RUST_BUILD_FLAGS) --lambda-dir "$(ARTIFACTS_DIR).clstage" --bin $(1)
 	mkdir -p "$(ARTIFACTS_DIR)"
 	cp "$(ARTIFACTS_DIR).clstage/$(1)/bootstrap" "$(ARTIFACTS_DIR)/bootstrap"
 	rm -rf "$(ARTIFACTS_DIR).clstage"

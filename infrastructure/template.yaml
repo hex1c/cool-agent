@@ -25,6 +25,9 @@ Parameters:
       template only grants read access and never embeds secret material.
     Default: /novus/development/config
 
+Conditions:
+  IsProduction: !Equals [!Ref EnvironmentName, production]
+
 Globals:
   Function:
     Runtime: provided.al2023
@@ -142,6 +145,14 @@ Resources:
           HttpMethod: "*"
           ResourcePath: "/*"
           LoggingLevel: INFO
+
+  WorkflowExecutionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/states/novus-${EnvironmentName}-workflows"
+      RetentionInDays: !If [IsProduction, 30, 7]
+      Tags:
+        - { Key: novus:environment, Value: !Ref EnvironmentName }
 
   # ---------------------------------------------------------------------------
   # IAM and security overlays (Task 39A). Nested stacks keep least-privilege
@@ -300,6 +311,91 @@ Resources:
       MemorySize: 512
       Timeout: 60
 
+  CostGuardIntakeFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-cost-guard-intake"
+      CodeUri: ..
+      Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.CostGuardRoleArn
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          OPERATION_CLASS: new_workflow
+          PRICING_VERSION: task41-2026-07-23
+          PRICING_APPROVAL_ID: task41-2026-07-23
+
+  CostGuardAiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-cost-guard-ai"
+      CodeUri: ..
+      Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.CostGuardRoleArn
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          OPERATION_CLASS: ai_call
+          PRICING_VERSION: task41-2026-07-23
+          PRICING_APPROVAL_ID: task41-2026-07-23
+
+  CostGuardExternalFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-cost-guard-external"
+      CodeUri: ..
+      Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.CostGuardRoleArn
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          OPERATION_CLASS: external_write
+          PRICING_VERSION: task41-2026-07-23
+          PRICING_APPROVAL_ID: task41-2026-07-23
+
+  CostGuardFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      FunctionName: !Sub "novus-${EnvironmentName}-cost-guard"
+      Description: >
+        Per-environment budget guard (ADR 0002, Task 41). Derives trusted
+        reservations from server-side envelopes, enforces warning/suspension/
+        hard-cap thresholds, and emits redacted observability. Environment
+        comes from function config, never caller payload.
+      CodeUri: ..
+      Handler: bootstrap
+      Role: !GetAtt FunctionsIamStack.Outputs.CostGuardRoleArn
+      MemorySize: 256
+      Timeout: 10
+      Events:
+        BudgetHeartbeat:
+          Type: Schedule
+          Properties:
+            Schedule: rate(5 minutes)
+            Enabled: true
+            Input: '{"action":"snapshot","schemaVersion":"novus.workflow-actions.v1"}'
+      Environment:
+        Variables:
+          ENVIRONMENT: !Ref EnvironmentName
+          APPLICATION_TABLE: !Ref ApplicationTable
+          BUDGET_TABLE: !Ref BudgetTable
+          ARTIFACT_BUCKET: !Ref ArtifactBucket
+          CONFIG_SSM_PARAMETER: !Ref ConfigSsmParameter
+          AWS_NODEJS_CONNECTION_REUSE_ENABLED: "1"
+          PRICING_VERSION: task41-2026-07-23
+          PRICING_APPROVAL_ID: task41-2026-07-23
+
   # ---------------------------------------------------------------------------
   # TypeScript Pi SDK Lambda handler
   # ---------------------------------------------------------------------------
@@ -328,7 +424,17 @@ Resources:
       Name: !Sub "novus-${EnvironmentName}-quotation"
       DefinitionUri: statemachines/quotation.asl.json
       Role: !GetAtt FunctionsIamStack.Outputs.StateMachineExecutionRoleArn
+      Logging:
+        Level: ALL
+        IncludeExecutionData: false
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt WorkflowExecutionLogGroup.Arn
       DefinitionSubstitutions:
+        CostGuardFunction: !GetAtt CostGuardFunction.Arn
+        CostGuardIntakeFunction: !GetAtt CostGuardIntakeFunction.Arn
+        CostGuardAiFunction: !GetAtt CostGuardAiFunction.Arn
+        CostGuardExternalFunction: !GetAtt CostGuardExternalFunction.Arn
         WebhookFunction: !GetAtt WebhookFunction.Arn
         AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn
         AgentHarnessFunction: !GetAtt AgentHarnessFunction.Arn
@@ -343,7 +449,17 @@ Resources:
       Name: !Sub "novus-${EnvironmentName}-calendar"
       DefinitionUri: statemachines/calendar.asl.json
       Role: !GetAtt FunctionsIamStack.Outputs.StateMachineExecutionRoleArn
+      Logging:
+        Level: ALL
+        IncludeExecutionData: false
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt WorkflowExecutionLogGroup.Arn
       DefinitionSubstitutions:
+        CostGuardFunction: !GetAtt CostGuardFunction.Arn
+        CostGuardIntakeFunction: !GetAtt CostGuardIntakeFunction.Arn
+        CostGuardAiFunction: !GetAtt CostGuardAiFunction.Arn
+        CostGuardExternalFunction: !GetAtt CostGuardExternalFunction.Arn
         WebhookFunction: !GetAtt WebhookFunction.Arn
         AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn
         AgentHarnessFunction: !GetAtt AgentHarnessFunction.Arn
@@ -356,12 +472,32 @@ Resources:
       Name: !Sub "novus-${EnvironmentName}-email"
       DefinitionUri: statemachines/email.asl.json
       Role: !GetAtt FunctionsIamStack.Outputs.StateMachineExecutionRoleArn
+      Logging:
+        Level: ALL
+        IncludeExecutionData: false
+        Destinations:
+          - CloudWatchLogsLogGroup:
+              LogGroupArn: !GetAtt WorkflowExecutionLogGroup.Arn
       DefinitionSubstitutions:
+        CostGuardFunction: !GetAtt CostGuardFunction.Arn
+        CostGuardIntakeFunction: !GetAtt CostGuardIntakeFunction.Arn
+        CostGuardAiFunction: !GetAtt CostGuardAiFunction.Arn
+        CostGuardExternalFunction: !GetAtt CostGuardExternalFunction.Arn
         WebhookFunction: !GetAtt WebhookFunction.Arn
         AttachmentCollectionFunction: !GetAtt AttachmentCollectionFunction.Arn
         AgentHarnessFunction: !GetAtt AgentHarnessFunction.Arn
         WorkflowActionFunction: !GetAtt WorkflowActionFunction.Arn
         EmailActionsFunction: !GetAtt EmailActionsFunction.Arn
+
+  MonitoringStack:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: monitoring.yaml
+      Parameters:
+        EnvironmentName: !Ref EnvironmentName
+        QuotationStateMachineArn: !Ref QuotationStateMachine
+        CalendarStateMachineArn: !Ref CalendarStateMachine
+        EmailStateMachineArn: !Ref EmailStateMachine
 
 Outputs:
   EdgeApiUrl:
@@ -379,6 +515,9 @@ Outputs:
   ArtifactBucketName:
     Description: S3 artifact bucket name.
     Value: !Ref ArtifactBucket
+  CostGuardFunctionArn:
+    Description: Environment-bound authoritative budget guard function ARN.
+    Value: !GetAtt CostGuardFunction.Arn
   QuotationStateMachineArn:
     Description: Quotation workflow state machine ARN.
     Value: !Ref QuotationStateMachine
