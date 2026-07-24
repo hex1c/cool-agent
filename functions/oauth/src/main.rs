@@ -1,17 +1,20 @@
 use std::collections::HashMap;
 use std::fmt::{Debug, Display};
-use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::SystemTime;
 
 use domain::identity::ParticipantId;
 use domain::retry::MAX_EXTERNAL_OPERATION_ATTEMPTS;
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
 use oauth::flow::{
     self, PendingState, StateStore, build_authorize_url, generate_pkce, generate_state,
-    state_digest, verify_callback,
+    state_digest, verify_provider_callback,
 };
+use oauth::google_endpoint::GoogleTokenEndpoint;
 use oauth::redaction::{AuthorizationCode, OAuthStateValue, RefreshToken};
-use oauth::tokens::{RefreshTokenStore, TokenEndpoint, TokenResponse, complete_exchange};
+#[cfg(test)]
+use oauth::tokens::TokenResponse;
+use oauth::tokens::{RefreshTokenStore, TokenEndpoint, complete_exchange};
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -196,7 +199,7 @@ where
     let pending = PendingState {
         participant: participant_id,
         code_verifier: pkce.verifier,
-        created_at: Instant::now(),
+        created_at: SystemTime::now(),
     };
 
     if store.store(&digest, pending).await.is_err() {
@@ -217,7 +220,6 @@ async fn process_callback<S, T, R>(
     refresh_store: &R,
     code: &str,
     state: &str,
-    participant_id: ParticipantId,
     redirect_uri: &str,
 ) -> OauthResponse
 where
@@ -231,16 +233,13 @@ where
     let state_value = OAuthStateValue::new(state.to_string());
     let auth_code = AuthorizationCode::new(code.to_string());
 
-    let callback_result =
-        verify_callback(state_store, &state_value, auth_code, participant_id).await;
+    let callback_result = verify_provider_callback(state_store, &state_value, auth_code).await;
 
     let result = match callback_result {
         Ok(r) => r,
         Err(flow::CallbackError::StateNotFound) => return OauthResponse::InvalidState,
         Err(flow::CallbackError::StateExpired) => return OauthResponse::StateExpired,
-        Err(flow::CallbackError::ParticipantMismatch) => {
-            return OauthResponse::ParticipantMismatch;
-        }
+        Err(flow::CallbackError::ParticipantMismatch) => return OauthResponse::ParticipantMismatch,
         Err(flow::CallbackError::Store(_)) => return OauthResponse::ExchangeFailed,
     };
 
@@ -293,7 +292,7 @@ where
     let path = ctx.http.path.as_str();
     let segments = path_segments(path);
 
-    // Expected paths: /oauth/authorize/{participant_id} or /oauth/callback/{participant_id}
+    // Expected paths: /oauth/authorize/{participant_id} or /oauth/google/callback.
     if segments.len() < 3 {
         return OauthResponse::NotFound;
     }
@@ -310,16 +309,15 @@ where
         return OauthResponse::MethodNotAllowed;
     }
 
-    let participant_id = match parse_participant_id(third) {
-        Ok(id) => id,
-        Err(()) => return OauthResponse::MissingParams,
-    };
-
-    match second {
-        "authorize" => {
+    match (second, third) {
+        ("authorize", participant) => {
+            let participant_id = match parse_participant_id(participant) {
+                Ok(id) => id,
+                Err(()) => return OauthResponse::MissingParams,
+            };
             process_authorize(state_store, participant_id, client_id, redirect_uri).await
         }
-        "callback" => {
+        ("google", "callback") => {
             let params = match event.query_string_parameters.as_ref() {
                 Some(p) => p,
                 None => return OauthResponse::MissingParams,
@@ -341,7 +339,6 @@ where
                 refresh_store,
                 code,
                 state,
-                participant_id,
                 redirect_uri,
             )
             .await
@@ -350,22 +347,23 @@ where
     }
 }
 
-// ── In-memory store implementations (for main wiring) ──────────────────
-
-/// Simple in-memory `StateStore` for local development.
-struct InMemoryStateStore {
-    inner: Mutex<HashMap<application::ports::OAuthStateDigest, PendingState>>,
+struct DynamoDbStateStore {
+    client: aws_sdk_dynamodb::Client,
+    table_name: String,
+    environment: String,
 }
 
-impl InMemoryStateStore {
-    fn new() -> Self {
-        Self {
-            inner: Mutex::new(HashMap::new()),
-        }
+impl DynamoDbStateStore {
+    fn key(&self, digest: &application::ports::OAuthStateDigest) -> String {
+        format!(
+            "ENV#{}#OAUTH_STATE#{}",
+            self.environment,
+            hex::encode(digest.as_bytes())
+        )
     }
 }
 
-impl StateStore for InMemoryStateStore {
+impl StateStore for DynamoDbStateStore {
     type Error = String;
 
     async fn store(
@@ -373,72 +371,178 @@ impl StateStore for InMemoryStateStore {
         digest: &application::ports::OAuthStateDigest,
         record: PendingState,
     ) -> Result<(), Self::Error> {
-        match self.inner.lock() {
-            Ok(mut map) => {
-                map.insert(*digest, record);
-                Ok(())
-            }
-            Err(e) => Err(format!("lock poisoned: {e}")),
-        }
+        let created_at = record
+            .created_at
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| "OAuth state timestamp is invalid".to_owned())?
+            .as_secs();
+        let expires_at = created_at.saturating_add(flow::STATE_TTL.as_secs());
+        self.client
+            .put_item()
+            .table_name(&self.table_name)
+            .item(
+                "pk",
+                aws_sdk_dynamodb::types::AttributeValue::S(self.key(digest)),
+            )
+            .item(
+                "sk",
+                aws_sdk_dynamodb::types::AttributeValue::S("METADATA".to_owned()),
+            )
+            .item(
+                "entity",
+                aws_sdk_dynamodb::types::AttributeValue::S("oauth_state".to_owned()),
+            )
+            .item(
+                "participant",
+                aws_sdk_dynamodb::types::AttributeValue::N(record.participant.get().to_string()),
+            )
+            .item(
+                "code_verifier",
+                aws_sdk_dynamodb::types::AttributeValue::S(
+                    record.code_verifier.as_str().to_owned(),
+                ),
+            )
+            .item(
+                "created_at",
+                aws_sdk_dynamodb::types::AttributeValue::N(created_at.to_string()),
+            )
+            .item(
+                "expires_at",
+                aws_sdk_dynamodb::types::AttributeValue::N(expires_at.to_string()),
+            )
+            .condition_expression("attribute_not_exists(pk)")
+            .send()
+            .await
+            .map_err(|_| "OAuth state storage failed".to_owned())?;
+        Ok(())
     }
 
     async fn consume(
         &self,
         digest: &application::ports::OAuthStateDigest,
     ) -> Result<Option<PendingState>, Self::Error> {
-        match self.inner.lock() {
-            Ok(mut map) => Ok(map.remove(digest)),
-            Err(e) => Err(format!("lock poisoned: {e}")),
-        }
+        let output = self
+            .client
+            .delete_item()
+            .table_name(&self.table_name)
+            .key(
+                "pk",
+                aws_sdk_dynamodb::types::AttributeValue::S(self.key(digest)),
+            )
+            .key(
+                "sk",
+                aws_sdk_dynamodb::types::AttributeValue::S("METADATA".to_owned()),
+            )
+            .return_values(aws_sdk_dynamodb::types::ReturnValue::AllOld)
+            .send()
+            .await
+            .map_err(|_| "OAuth state consume failed".to_owned())?;
+        let Some(attributes) = output.attributes else {
+            return Ok(None);
+        };
+        let participant = attributes
+            .get("participant")
+            .and_then(|value| value.as_n().ok())
+            .and_then(|value| value.parse::<i64>().ok())
+            .and_then(|value| ParticipantId::new(value).ok())
+            .ok_or_else(|| "OAuth state participant is invalid".to_owned())?;
+        let code_verifier = attributes
+            .get("code_verifier")
+            .and_then(|value| value.as_s().ok())
+            .filter(|value| !value.is_empty())
+            .map(|value| oauth::redaction::PkceVerifier::new(value.to_owned()))
+            .ok_or_else(|| "OAuth state verifier is invalid".to_owned())?;
+        let created_at = attributes
+            .get("created_at")
+            .and_then(|value| value.as_n().ok())
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(|value| std::time::UNIX_EPOCH + std::time::Duration::from_secs(value))
+            .ok_or_else(|| "OAuth state timestamp is invalid".to_owned())?;
+        Ok(Some(PendingState {
+            participant,
+            code_verifier,
+            created_at,
+        }))
     }
 }
 
-/// Stub `TokenEndpoint` that always fails — real implementation wired later.
-#[derive(Clone)]
-struct StubTokenEndpoint;
+struct SsmRefreshTokenStore {
+    client: aws_sdk_ssm::Client,
+    environment: String,
+}
 
-impl TokenEndpoint for StubTokenEndpoint {
-    type Error = String;
-
-    async fn exchange(
-        &self,
-        _code: &str,
-        _redirect_uri: &str,
-        _code_verifier: &str,
-    ) -> Result<TokenResponse, Self::Error> {
-        Err("stub: not implemented".into())
-    }
-
-    async fn refresh(&self, _refresh_token: &str) -> Result<TokenResponse, Self::Error> {
-        Err("stub: not implemented".into())
-    }
-
-    async fn revoke(&self, _token: &str) -> Result<(), Self::Error> {
-        Err("stub: not implemented".into())
+impl SsmRefreshTokenStore {
+    fn parameter_name(&self, participant: ParticipantId) -> String {
+        format!(
+            "/novus/{}/google/refresh-tokens/{}",
+            self.environment,
+            participant.get()
+        )
     }
 }
 
-/// Stub `RefreshTokenStore` that always fails — real implementation wired later.
-#[derive(Clone)]
-struct StubRefreshTokenStore;
-
-impl RefreshTokenStore for StubRefreshTokenStore {
+impl RefreshTokenStore for SsmRefreshTokenStore {
     type Error = String;
 
     async fn store(
         &self,
-        _participant: ParticipantId,
-        _token: &RefreshToken,
+        participant: ParticipantId,
+        token: &RefreshToken,
     ) -> Result<(), Self::Error> {
-        Err("stub: not implemented".into())
+        self.client
+            .put_parameter()
+            .name(self.parameter_name(participant))
+            .r#type(aws_sdk_ssm::types::ParameterType::SecureString)
+            .value(token.as_str())
+            .overwrite(true)
+            .send()
+            .await
+            .map_err(|_| "refresh token storage failed".to_owned())?;
+        Ok(())
     }
 
-    async fn load(&self, _participant: ParticipantId) -> Result<Option<RefreshToken>, Self::Error> {
-        Err("stub: not implemented".into())
+    async fn load(&self, participant: ParticipantId) -> Result<Option<RefreshToken>, Self::Error> {
+        match self
+            .client
+            .get_parameter()
+            .name(self.parameter_name(participant))
+            .with_decryption(true)
+            .send()
+            .await
+        {
+            Ok(output) => Ok(output
+                .parameter()
+                .and_then(|parameter| parameter.value())
+                .map(|value| RefreshToken::new(value.to_owned()))),
+            Err(error)
+                if error
+                    .as_service_error()
+                    .is_some_and(|service| service.is_parameter_not_found()) =>
+            {
+                Ok(None)
+            }
+            Err(_) => Err("refresh token load failed".to_owned()),
+        }
     }
 
-    async fn delete(&self, _participant: ParticipantId) -> Result<(), Self::Error> {
-        Err("stub: not implemented".into())
+    async fn delete(&self, participant: ParticipantId) -> Result<(), Self::Error> {
+        match self
+            .client
+            .delete_parameter()
+            .name(self.parameter_name(participant))
+            .send()
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(error)
+                if error
+                    .as_service_error()
+                    .is_some_and(|service| service.is_parameter_not_found()) =>
+            {
+                Ok(())
+            }
+            Err(_) => Err("refresh token deletion failed".to_owned()),
+        }
     }
 }
 
@@ -450,10 +554,31 @@ async fn main() -> Result<(), Error> {
         .map_err(|_| "OAUTH_CLIENT_ID environment variable is not set")?;
     let redirect_uri = std::env::var("OAUTH_REDIRECT_URI")
         .map_err(|_| "OAUTH_REDIRECT_URI environment variable is not set")?;
+    let environment = std::env::var("ENVIRONMENT").unwrap_or_else(|_| "development".to_owned());
+    let sdk_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let mut ssm_config = aws_sdk_ssm::config::Builder::from(&sdk_config);
+    if let Ok(endpoint) = std::env::var("LOCALSTACK_ENDPOINT") {
+        ssm_config = ssm_config.endpoint_url(endpoint);
+    }
+    let ssm_client = aws_sdk_ssm::Client::from_conf(ssm_config.build());
+    let client_secret = load_oauth_client_secret(&ssm_client).await?;
+    let mut dynamodb_config = aws_sdk_dynamodb::config::Builder::from(&sdk_config);
+    if let Ok(endpoint) = std::env::var("DYNAMODB_ENDPOINT") {
+        dynamodb_config = dynamodb_config.endpoint_url(endpoint);
+    }
+    let application_table = std::env::var("APPLICATION_TABLE")
+        .map_err(|_| "APPLICATION_TABLE environment variable is not set")?;
 
-    let state_store = Arc::new(InMemoryStateStore::new());
-    let token_endpoint = StubTokenEndpoint;
-    let refresh_store = StubRefreshTokenStore;
+    let state_store = Arc::new(DynamoDbStateStore {
+        client: aws_sdk_dynamodb::Client::from_conf(dynamodb_config.build()),
+        table_name: application_table,
+        environment: environment.clone(),
+    });
+    let token_endpoint = Arc::new(GoogleTokenEndpoint::new(client_id.clone(), client_secret)?);
+    let refresh_store = Arc::new(SsmRefreshTokenStore {
+        client: ssm_client,
+        environment,
+    });
 
     run(service_fn(move |event: LambdaEvent<ApiGatewayEvent>| {
         let state_store = state_store.clone();
@@ -465,8 +590,8 @@ async fn main() -> Result<(), Error> {
             let response = route_oauth(
                 &event.payload,
                 &*state_store,
-                &token_endpoint,
-                &refresh_store,
+                &*token_endpoint,
+                &*refresh_store,
                 &client_id,
                 &redirect_uri,
             )
@@ -477,6 +602,29 @@ async fn main() -> Result<(), Error> {
         }
     }))
     .await
+}
+
+async fn load_oauth_client_secret(client: &aws_sdk_ssm::Client) -> Result<String, Error> {
+    if let Ok(secret) = std::env::var("OAUTH_CLIENT_SECRET")
+        && !secret.is_empty()
+    {
+        return Ok(secret);
+    }
+    let parameter_name = std::env::var("OAUTH_CLIENT_SECRET_PARAMETER")
+        .map_err(|_| "OAUTH_CLIENT_SECRET or OAUTH_CLIENT_SECRET_PARAMETER must be set")?;
+    let output = client
+        .get_parameter()
+        .name(parameter_name)
+        .with_decryption(true)
+        .send()
+        .await
+        .map_err(|_| "OAuth client secret parameter could not be loaded")?;
+    output
+        .parameter()
+        .and_then(|parameter| parameter.value())
+        .filter(|secret| !secret.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| "OAuth client secret parameter is empty".into())
 }
 
 fn emit_oauth_metric(status_code: u16) {
@@ -688,7 +836,7 @@ mod tests {
         }
     }
 
-    fn make_callback_event(code: &str, state: &str, participant_id: i64) -> ApiGatewayEvent {
+    fn make_callback_event(code: &str, state: &str, _participant_id: i64) -> ApiGatewayEvent {
         let mut params = HashMap::new();
         params.insert("code".into(), code.to_string());
         params.insert("state".into(), state.to_string());
@@ -698,7 +846,7 @@ mod tests {
             request_context: Some(RequestContext {
                 http: HttpContext {
                     method: "GET".into(),
-                    path: format!("/oauth/callback/{participant_id}"),
+                    path: "/oauth/google/callback".into(),
                 },
             }),
         }
@@ -709,7 +857,7 @@ mod tests {
         PendingState {
             participant: participant_id,
             code_verifier: pkce.verifier,
-            created_at: Instant::now(),
+            created_at: SystemTime::now(),
         }
     }
 
@@ -911,7 +1059,7 @@ mod tests {
             request_context: Some(RequestContext {
                 http: HttpContext {
                     method: "GET".into(),
-                    path: "/oauth/callback/42".into(),
+                    path: "/oauth/google/callback".into(),
                 },
             }),
         };

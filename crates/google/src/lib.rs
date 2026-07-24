@@ -3,6 +3,7 @@ pub mod calendar;
 pub mod drive;
 pub mod existing_files;
 pub mod mutations;
+pub mod reqwest_clients;
 pub mod sheets_docs;
 
 pub use crate::drive::FileKind;

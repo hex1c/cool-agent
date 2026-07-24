@@ -1,5 +1,5 @@
 use std::fmt::{Debug, Display};
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 
 use application::ports::OAuthStateDigest;
 use base64::Engine;
@@ -103,7 +103,7 @@ pub struct PendingState {
     /// The PKCE code verifier needed to exchange the authorization code.
     pub code_verifier: PkceVerifier,
     /// When this state record was created, for expiry checks.
-    pub created_at: Instant,
+    pub created_at: SystemTime,
 }
 
 /// Abstraction for storing and atomically consuming OAuth state records.
@@ -169,6 +169,33 @@ pub enum CallbackError<E: Display + Debug> {
     Store(E),
 }
 
+/// Verify an OAuth callback using the participant bound to the stored state.
+///
+/// This is the provider-callback path: Google redirects to one fixed callback
+/// URI, so participant identity comes only from the single-use state record.
+pub async fn verify_provider_callback<S: StateStore>(
+    store: &S,
+    state: &OAuthStateValue,
+    authorization_code: AuthorizationCode,
+) -> Result<CallbackResult, CallbackError<S::Error>> {
+    let digest = state_digest(state);
+    let record = store
+        .consume(&digest)
+        .await
+        .map_err(CallbackError::Store)?
+        .ok_or(CallbackError::StateNotFound)?;
+
+    if state_is_expired(record.created_at) {
+        return Err(CallbackError::StateExpired);
+    }
+
+    Ok(CallbackResult {
+        participant: record.participant,
+        code_verifier: record.code_verifier,
+        authorization_code,
+    })
+}
+
 /// Verify an OAuth callback by validating the state parameter and consuming it atomically.
 ///
 /// This function:
@@ -199,7 +226,7 @@ pub async fn verify_callback<S: StateStore>(
         .map_err(CallbackError::Store)?
         .ok_or(CallbackError::StateNotFound)?;
 
-    if record.created_at.elapsed() >= STATE_TTL {
+    if state_is_expired(record.created_at) {
         return Err(CallbackError::StateExpired);
     }
 
@@ -212,4 +239,10 @@ pub async fn verify_callback<S: StateStore>(
         code_verifier: record.code_verifier,
         authorization_code,
     })
+}
+
+fn state_is_expired(created_at: SystemTime) -> bool {
+    SystemTime::now()
+        .duration_since(created_at)
+        .is_ok_and(|elapsed| elapsed >= STATE_TTL)
 }

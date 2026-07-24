@@ -123,8 +123,54 @@ put_secret() {
 put_secret /novus/development/telegram/bot-token local-test-token
 put_secret /novus/development/telegram/webhook-secret local-webhook-secret-not-real
 put_secret /novus/development/google/client-secret local-google-secret-not-real
-put_secret /novus/development/smtp/credentials local-smtp-credentials-not-real
+put_secret /novus/development/smtp/credentials '{"username":"sandbox@example.test","password":"local-smtp-password-not-real"}'
 put_secret /novus/development/ai/provider-key local-ai-key-not-real
+put_secret /novus/local/storage/page-token-key 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+
+render_state_machine() {
+  source_file="$1"
+  destination="$2"
+  sed \
+    -e 's/${AgentHarnessFunction}/AgentHarnessFunction/g' \
+    -e 's/${AttachmentCollectionFunction}/AttachmentCollectionFunction/g' \
+    -e 's/${CalendarActionsFunction}/CalendarActionsFunction/g' \
+    -e 's/${CostGuardAiFunction}/CostGuardAiFunction/g' \
+    -e 's/${CostGuardExternalFunction}/CostGuardExternalFunction/g' \
+    -e 's/${CostGuardFunction}/CostGuardFunction/g' \
+    -e 's/${CostGuardIntakeFunction}/CostGuardIntakeFunction/g' \
+    -e 's/${DeliveryFunction}/DeliveryFunction/g' \
+    -e 's/${EmailActionsFunction}/EmailActionsFunction/g' \
+    -e 's/${GoogleActionsFunction}/GoogleActionsFunction/g' \
+    -e 's/${PdfRenderFunction}/PdfRenderFunction/g' \
+    -e 's/${WorkflowActionFunction}/WorkflowActionFunction/g' \
+    "$source_file" > "$destination"
+}
+
+upsert_state_machine() {
+  name="$1"
+  definition_file="$2"
+  arn=$(aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions list-state-machines \
+    --query "stateMachines[?name=='$name'].stateMachineArn | [0]" \
+    --output text)
+  if [ "$arn" = "None" ] || [ -z "$arn" ]; then
+    aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions create-state-machine \
+      --name "$name" \
+      --definition "file://$definition_file" \
+      --role-arn arn:aws:iam::123456789012:role/NovusLocalDummyRole \
+      >/dev/null
+  else
+    aws --endpoint-url "$STEPFUNCTIONS_ENDPOINT" stepfunctions update-state-machine \
+      --state-machine-arn "$arn" \
+      --definition "file://$definition_file" \
+      >/dev/null
+  fi
+}
+
+for workflow in quotation calendar email; do
+  rendered="/tmp/$workflow.asl.json"
+  render_state_machine "/app/statemachines/$workflow.asl.json" "$rendered"
+  upsert_state_machine "novus-local-$workflow" "$rendered"
+done
 
 state_machine_name=novus-local-wait-resume
 state_machine_definition='{"Comment":"Sanitized local wait/resume proof","StartAt":"Wait","States":{"Wait":{"Type":"Wait","Seconds":1,"Next":"Done"},"Done":{"Type":"Succeed"}}}'

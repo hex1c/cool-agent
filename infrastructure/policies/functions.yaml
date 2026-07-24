@@ -225,6 +225,16 @@ Resources:
         - !Ref XRayAccessPolicy
         - !Ref DynamoDBWorkflowWritePolicy
         - !Ref SecretReadPolicy
+      Policies:
+        - PolicyName: OAuthRefreshTokenWrite
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:PutParameter
+                  - ssm:DeleteParameter
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/novus/${EnvironmentName}/google/refresh-tokens/*"
       Tags:
         - Key: novus:environment
           Value: !Ref EnvironmentName
