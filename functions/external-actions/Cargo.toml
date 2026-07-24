@@ -6,6 +6,8 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+aws-config.workspace = true
+aws-sdk-ssm.workspace = true
 lambda_runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -14,6 +16,7 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 application.workspace = true
 google.workspace = true
 email.workspace = true
+oauth.workspace = true
 domain.workspace = true
 
 [dev-dependencies]

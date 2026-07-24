@@ -12,6 +12,8 @@ test-utils = []
 [dependencies]
 application.workspace = true
 domain.workspace = true
+hex.workspace = true
+lettre.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
 

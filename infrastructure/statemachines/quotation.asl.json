@@ -1,37 +1,8 @@
 {
   "Comment": "Quotation workflow: intake \u2192 extraction \u2192 calculation \u2192 clarification \u2192 confirmation \u2192 Sheet/Doc creation \u2192 PDF render \u2192 artifact delivery (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths.",
-  "StartAt": "ValidateIntake",
+  "StartAt": "ReserveIntakeBudget",
   "TimeoutSeconds": 86400,
   "States": {
-    "ValidateIntake": {
-      "Type": "Task",
-      "Resource": "arn:aws:states:::lambda:invoke",
-      "Parameters": {
-        "FunctionName": "${WebhookFunction}",
-        "Payload.$": "$"
-      },
-      "Retry": [
-        {
-          "ErrorEquals": [
-            "States.TaskFailed"
-          ],
-          "IntervalSeconds": 2,
-          "MaxAttempts": 3,
-          "BackoffRate": 2.0
-        }
-      ],
-      "Catch": [
-        {
-          "ErrorEquals": [
-            "States.ALL"
-          ],
-          "Next": "IntakeFailed",
-          "ResultPath": "$.error"
-        }
-      ],
-      "ResultPath": "$.intakeResult",
-      "Next": "ReserveIntakeBudget"
-    },
     "CollectAttachments": {
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke",

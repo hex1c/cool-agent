@@ -1,29 +1,58 @@
-use external_actions_functions::CalendarActionEvent;
+use std::sync::Arc;
+
+use application::external_operation::ProviderOutcome;
+use external_actions_functions::runtime_auth::SsmOwnerTokenSource;
+use external_actions_functions::{
+    CalendarActionEvent, CalendarActionRunner, process_calendar_action,
+};
+use google::calendar::{
+    CalendarEventRequest, ConfirmedCalendarProof, CreateEventError, GoogleCalendarService,
+};
+use google::reqwest_clients::ReqwestGoogleClient;
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
 use serde_json::Value;
 
-/// Lambda entry for the `calendar` handler.
-///
-/// Deserializes a versioned [`CalendarActionEvent`] and validates the event.
-/// Full adapter wiring (Google Calendar client + operation journal) is
-/// deferred to Task 39 (SAM resource packaging); until then this entry
-/// validates the event and reports a typed `adapter_not_configured` outcome
-/// so the contract is exercisable without credentials. The pure preprocessing,
-/// runner injection, and outcome mapping are unit-tested in
-/// `tests/handlers.rs`.
+struct CalendarRunner {
+    service: GoogleCalendarService<ReqwestGoogleClient>,
+    token_source: SsmOwnerTokenSource,
+}
+
+impl CalendarActionRunner for CalendarRunner {
+    async fn run(
+        &self,
+        proof: &ConfirmedCalendarProof,
+        request: &CalendarEventRequest,
+    ) -> Result<ProviderOutcome, CreateEventError> {
+        self.service
+            .create_event(&self.token_source, proof, request)
+            .await
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    run(service_fn(handle)).await
+    let runner = Arc::new(CalendarRunner {
+        service: GoogleCalendarService::new(ReqwestGoogleClient::new()?),
+        token_source: SsmOwnerTokenSource::from_environment().await?,
+    });
+    run(service_fn(move |event| {
+        let runner = Arc::clone(&runner);
+        async move { handle(event, runner.as_ref()).await }
+    }))
+    .await
 }
 
-async fn handle(event: LambdaEvent<Value>) -> Result<Value, Error> {
-    let _parsed: CalendarActionEvent = match serde_json::from_value(event.payload) {
+async fn handle(event: LambdaEvent<Value>, runner: &CalendarRunner) -> Result<Value, Error> {
+    let parsed: CalendarActionEvent = match serde_json::from_value(event.payload) {
         Ok(event) => event,
-        Err(_) => return Ok(adapter_not_configured()),
+        Err(_) => return Ok(error_value("invalid_event")),
     };
-    Ok(adapter_not_configured())
+    match process_calendar_action(parsed, runner).await {
+        Ok(result) => serde_json::to_value(result).map_err(Into::into),
+        Err(_) => Ok(error_value("calendar_action_failed")),
+    }
 }
 
-fn adapter_not_configured() -> Value {
-    serde_json::json!({ "error": "calendar adapter wiring pending (Task 39)" })
+fn error_value(code: &'static str) -> Value {
+    serde_json::json!({ "error": code })
 }

@@ -14,6 +14,8 @@ pub enum NormalizeError {
     MissingThreadId { chat_id: ChatId },
     /// No actionable content found in the update (no message text, no callback, no media).
     EmptyUpdate,
+    /// The actionable update did not contain a valid positive source message ID.
+    InvalidMessageId,
 }
 
 impl core::fmt::Display for NormalizeError {
@@ -28,6 +30,7 @@ impl core::fmt::Display for NormalizeError {
                 write!(f, "forum chat {chat_id} is missing message_thread_id")
             }
             Self::EmptyUpdate => f.write_str("update contains no actionable content"),
+            Self::InvalidMessageId => f.write_str("update has no valid source message id"),
         }
     }
 }
@@ -93,6 +96,8 @@ pub enum EventKind {
 pub struct NormalizedUpdate {
     /// Telegram's monotonic update identifier used for deduplication.
     pub update_id: i64,
+    /// Telegram message that produced this update and is recorded in audit history.
+    pub source_message_id: MessageId,
     /// The routing outcome for this update's chat and topic.
     pub route: Route,
     /// The classified business event.
@@ -352,9 +357,15 @@ pub fn normalize(raw_body: &[u8]) -> Result<NormalizedUpdate, NormalizeError> {
             return Err(NormalizeError::UnsupportedChat { chat_id });
         }
 
+        let source_message_id = cb
+            .message
+            .as_ref()
+            .and_then(|message| MessageId::new(message.message_id).ok())
+            .ok_or(NormalizeError::InvalidMessageId)?;
         let event = classify_callback_event(cb)?;
         return Ok(NormalizedUpdate {
             update_id: update.update_id,
+            source_message_id,
             route,
             event,
         });
@@ -372,9 +383,12 @@ pub fn normalize(raw_body: &[u8]) -> Result<NormalizedUpdate, NormalizeError> {
             return Err(NormalizeError::UnsupportedChat { chat_id });
         }
 
+        let source_message_id =
+            MessageId::new(msg.message_id).map_err(|_| NormalizeError::InvalidMessageId)?;
         let event = classify_message_event(msg)?;
         return Ok(NormalizedUpdate {
             update_id: update.update_id,
+            source_message_id,
             route,
             event,
         });
@@ -402,6 +416,7 @@ mod tests {
         let json = fixture("mention");
         let result = normalize(json.as_bytes()).expect("mention normalization failed");
         assert_eq!(result.update_id, 1001);
+        assert_eq!(result.source_message_id.get(), 5);
         assert!(matches!(result.event, EventKind::Mention { .. }));
         assert!(matches!(result.route, Route::ForumTopic { .. }));
     }

@@ -11,7 +11,7 @@
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::SystemTime;
 
 use domain::identity::ParticipantId;
 use domain::retry::RetryPolicy;
@@ -416,7 +416,7 @@ async fn seed_state(store: &MockStateStore, participant_value: ParticipantId) ->
             PendingState {
                 participant: participant_value,
                 code_verifier: pkce.verifier,
-                created_at: Instant::now(),
+                created_at: SystemTime::now(),
             },
         )
         .await

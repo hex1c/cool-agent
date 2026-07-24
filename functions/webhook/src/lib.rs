@@ -1,5 +1,7 @@
 #![deny(unsafe_code)]
 
+pub mod dispatch;
+
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -50,6 +52,8 @@ pub struct AcceptedUpdate {
     pub update_id: i64,
     pub route: &'static str,
     pub event_kind: &'static str,
+    #[serde(skip)]
+    pub normalized: telegram::normalize::NormalizedUpdate,
 }
 
 fn route_label(route: &telegram::normalize::NormalizedUpdate) -> &'static str {
@@ -142,7 +146,9 @@ pub fn process_webhook(event: &ApiGatewayEvent, verifier: &WebhookVerifier) -> W
                     reason: "parse_error",
                 };
             }
-            NormalizeError::MissingSender | NormalizeError::EmptyUpdate => {
+            NormalizeError::MissingSender
+            | NormalizeError::EmptyUpdate
+            | NormalizeError::InvalidMessageId => {
                 return WebhookResponse::Malformed {
                     reason: "missing_sender",
                 };
@@ -157,5 +163,6 @@ pub fn process_webhook(event: &ApiGatewayEvent, verifier: &WebhookVerifier) -> W
         update_id: update.update_id,
         route: route_label(&update),
         event_kind: event_kind_label(&update),
+        normalized: update,
     })
 }

@@ -41,11 +41,12 @@ services:
     ports:
       - "127.0.0.1:8083:8083"
     environment:
-      # Disable the local Lambda executor; wait/resume-with-Lambda live runs
-      # are deferred to Task 42 E2E suites. The service stays exercisable for
-      # state-machine create/start/describe and Wait-state executions.
-      LAMBDA_EXECUTOR: ""
+      # Route Lambda service integrations to `sam local start-lambda`, started
+      # by scripts/local-run.sh telegram-dev on the host.
+      LAMBDA_ENDPOINT: http://host.docker.internal:3001
       DDB_ENDPOINT: http://dynamodb-local:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   mailhog:
     # Mock SMTP server. SMTP on 1025, API/UI on 8025.
@@ -109,4 +110,5 @@ services:
       ARTIFACT_BUCKET: novus-development-artifacts-local
     volumes:
       - ./init.sh:/app/init.sh:ro
+      - ../statemachines:/app/statemachines:ro
     restart: "no"

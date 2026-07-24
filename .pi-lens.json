@@ -6,5 +6,21 @@
     "autoFix": {
       "enabled": false
     }
+  },
+  "serverOverrides": {
+    "yaml": {
+      "initializationOptions": {
+        "yaml": {
+          "customTags": [
+            "!Equals sequence",
+            "!GetAtt scalar",
+            "!If sequence",
+            "!Not sequence",
+            "!Ref scalar",
+            "!Sub scalar"
+          ]
+        }
+      }
+    }
   }
 }

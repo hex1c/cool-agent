@@ -15,6 +15,19 @@ require_command() {
 	command -v "$1" >/dev/null 2>&1 || fail "required command not found: $1"
 }
 
+compose() {
+	if docker compose version >/dev/null 2>&1; then
+		docker compose "$@"
+	elif command -v docker-compose >/dev/null 2>&1; then
+		docker-compose "$@"
+	else
+		docker run --rm \
+			-v /var/run/docker.sock:/var/run/docker.sock \
+			-v "$ROOT:$ROOT" -w "$ROOT" \
+			docker/compose:1.29.2 "$@"
+	fi
+}
+
 load_dotenv() {
 	[[ -f "$ENV_FILE" ]] || fail "environment file not found: $ENV_FILE (copy .env.example to .env)"
 	require_command python3
@@ -81,10 +94,26 @@ map_alias() {
 configure_runtime_environment() {
 	export NOVUS_ENVIRONMENT=${NOVUS_ENVIRONMENT:-local}
 	export ENVIRONMENT=${ENVIRONMENT:-$NOVUS_ENVIRONMENT}
+	export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-test}
+	export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-test}
+	export AWS_REGION=${AWS_REGION:-us-east-1}
+	export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-$AWS_REGION}
+	export APPLICATION_TABLE=${APPLICATION_TABLE:-novus-development-application}
+	export DYNAMODB_ENDPOINT=${DYNAMODB_ENDPOINT:-http://host.docker.internal:8000}
+	export STEPFUNCTIONS_ENDPOINT=${STEPFUNCTIONS_ENDPOINT:-http://host.docker.internal:8083}
+	export LOCALSTACK_ENDPOINT=${LOCALSTACK_ENDPOINT:-http://host.docker.internal:4566}
+	export QUOTATION_STATE_MACHINE_ARN=${QUOTATION_STATE_MACHINE_ARN:-arn:aws:states:us-east-1:123456789012:stateMachine:novus-local-quotation}
+	export CALENDAR_STATE_MACHINE_ARN=${CALENDAR_STATE_MACHINE_ARN:-arn:aws:states:us-east-1:123456789012:stateMachine:novus-local-calendar}
+	export EMAIL_STATE_MACHINE_ARN=${EMAIL_STATE_MACHINE_ARN:-arn:aws:states:us-east-1:123456789012:stateMachine:novus-local-email}
+	if [[ -z ${PAGE_TOKEN_SIGNING_KEY_HEX:-} ]]; then
+		PAGE_TOKEN_SIGNING_KEY_HEX=$(python3 -c 'import secrets; print(secrets.token_hex(32))')
+		export PAGE_TOKEN_SIGNING_KEY_HEX
+	fi
 
 	map_alias NOVUS_AI_PROVIDER_KEY GEMINI_API_KEY
 	map_alias TELEGRAM_SECRET_TOKEN TELEGRAM_WEBHOOK_SECRET
 	map_alias OAUTH_CLIENT_ID GOOGLE_OAUTH_CLIENT_ID
+	map_alias OAUTH_CLIENT_SECRET GOOGLE_OAUTH_CLIENT_SECRET
 	map_alias OAUTH_REDIRECT_URI GOOGLE_OAUTH_REDIRECT_URI
 }
 
@@ -101,9 +130,26 @@ import sys
 from pathlib import Path
 
 keys = {
-    "WebhookFunction": ("ENVIRONMENT", "TELEGRAM_SECRET_TOKEN"),
-    "OAuthFunction": ("ENVIRONMENT", "OAUTH_CLIENT_ID", "OAUTH_REDIRECT_URI"),
+    "WebhookFunction": (
+        "ENVIRONMENT", "TELEGRAM_SECRET_TOKEN", "APPLICATION_TABLE",
+        "DYNAMODB_ENDPOINT", "STEPFUNCTIONS_ENDPOINT", "PAGE_TOKEN_SIGNING_KEY_HEX",
+        "QUOTATION_STATE_MACHINE_ARN", "CALENDAR_STATE_MACHINE_ARN",
+        "EMAIL_STATE_MACHINE_ARN", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "OAuthFunction": (
+        "ENVIRONMENT", "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET",
+        "OAUTH_REDIRECT_URI", "LOCALSTACK_ENDPOINT", "DYNAMODB_ENDPOINT",
+        "APPLICATION_TABLE", "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
     "AgentHarnessFunction": ("ENVIRONMENT", "NOVUS_AI_PROVIDER_KEY"),
+    "EmailActionsFunction": (
+        "ENVIRONMENT", "HOSTINGER_SMTP_HOST", "HOSTINGER_SMTP_PORT",
+        "HOSTINGER_SMTP_SECURITY", "HOSTINGER_SMTP_USERNAME",
+        "HOSTINGER_SMTP_PASSWORD", "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
 }
 payload = {
     function: {key: os.environ[key] for key in names if os.environ.get(key)}
@@ -165,45 +211,68 @@ PY
 
 telegram_dev() {
 	require_command cloudflared
+	require_command docker
+	require_command sam
 	require_value TELEGRAM_BOT_TOKEN
 	require_value TELEGRAM_WEBHOOK_SECRET
 	require_value TELEGRAM_SECRET_TOKEN
+	[[ -f "$SAM_TEMPLATE" ]] || fail "SAM build missing; run scripts/local-run.sh sam-build first"
 
-	local log
-	log=$(mktemp "${TMPDIR:-/tmp}/novus-tunnel.XXXXXX")
-	chmod 600 "$log"
+	compose -f "$COMPOSE_FILE" up -d
+	local tunnel_log sam_env
+	tunnel_log=$(mktemp "${TMPDIR:-/tmp}/novus-tunnel.XXXXXX")
+	sam_env=$(mktemp "${TMPDIR:-/tmp}/novus-sam-env.XXXXXX.json")
+	chmod 600 "$tunnel_log" "$sam_env"
+	write_sam_env "$sam_env"
 
-	cloudflared tunnel --url http://127.0.0.1:3000 --no-autoupdate >"$log" 2>&1 &
-	local tunnel_pid=$!
+	sam local start-api --template "$SAM_TEMPLATE" --env-vars "$sam_env" --port 3000 &
+	local api_pid=$!
+	sam local start-lambda --template "$SAM_TEMPLATE" --env-vars "$sam_env" --port 3001 &
+	local lambda_pid=$!
 
 	cleanup_telegram_dev() {
 		telegram_webhook_request deleteWebhook 2>/dev/null || true
-		kill "$tunnel_pid" 2>/dev/null || true
-		rm -f "$log"
+		kill "${tunnel_pid:-}" "$lambda_pid" "$api_pid" 2>/dev/null || true
+		rm -f "$tunnel_log" "$sam_env"
 	}
 	trap cleanup_telegram_dev EXIT INT TERM
 
+	python3 - <<'PY'
+import socket
+import time
+for _ in range(60):
+    try:
+        with socket.create_connection(("127.0.0.1", 3000), timeout=1):
+            break
+    except OSError:
+        time.sleep(1)
+else:
+    raise SystemExit("local-run: SAM API did not become ready on port 3000")
+PY
+
+	cloudflared tunnel --url http://127.0.0.1:3000 --no-autoupdate >"$tunnel_log" 2>&1 &
+	local tunnel_pid=$!
 	printf 'Waiting for Cloudflare Quick Tunnel...\n'
 	local url=""
 	local waited=0
 	while [[ -z "$url" && $waited -lt 60 ]]; do
 		sleep 1
 		waited=$((waited + 1))
-		url=$(grep -m1 -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$log" 2>/dev/null || true)
+		url=$(grep -m1 -oE 'https://[a-z0-9-]+\.trycloudflare\.com' "$tunnel_log" 2>/dev/null || true)
 		if ! kill -0 "$tunnel_pid" 2>/dev/null; then
-			cat "$log" >&2
+			cat "$tunnel_log" >&2
 			fail "cloudflared exited before producing a tunnel URL"
 		fi
 	done
 	[[ -n "$url" ]] || {
-		cat "$log" >&2
+		cat "$tunnel_log" >&2
 		fail "tunnel URL not found within 60s"
 	}
 
 	printf 'Tunnel: %s\n' "$url"
 	telegram_webhook_request setWebhook "$url"
 	printf '\nWebhook registered. Send a message to your bot.\nPress Ctrl-C to stop and remove the webhook.\n\n'
-	wait "$tunnel_pid"
+	wait -n "$tunnel_pid" "$lambda_pid" "$api_pid"
 }
 
 show_config() {
@@ -242,7 +311,7 @@ Commands:
   telegram-tunnel               Expose local SAM port 3000 through Cloudflare Quick Tunnel
   telegram-set-webhook URL      Register URL/webhook with Telegram and the configured secret
   telegram-delete-webhook       Remove the configured Telegram webhook
-  telegram-dev                  Start tunnel + auto-register webhook (assumes sam-api is running)
+  telegram-dev                  Start SAM API/Lambda, tunnel, and auto-register webhook
 
 NOVUS_ENV_FILE may point to a file other than PROJECT_ROOT/.env.
 Existing process variables override values in the dotenv file.
@@ -283,14 +352,14 @@ preflight)
 	;;
 sandbox-up)
 	require_command docker
-	exec docker compose -f "$COMPOSE_FILE" up -d
+	compose -f "$COMPOSE_FILE" up -d
 	;;
 sandbox-test)
 	exec cargo test -p integration-tests --test local_sandbox --features integration
 	;;
 sandbox-down)
 	require_command docker
-	exec docker compose -f "$COMPOSE_FILE" down -v
+	compose -f "$COMPOSE_FILE" down -v
 	;;
 sam-build)
 	require_command sam

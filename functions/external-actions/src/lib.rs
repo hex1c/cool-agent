@@ -11,6 +11,7 @@
 pub mod calendar;
 pub mod email;
 pub mod google;
+pub mod runtime_auth;
 
 pub use calendar::{CalendarActionEvent, CalendarActionRunner, process_calendar_action};
 pub use email::{EmailActionEvent, EmailActionRunner, process_email_action};

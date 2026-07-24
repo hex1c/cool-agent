@@ -2,19 +2,88 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use aws_sdk_sfn::Client as StepFunctionsClient;
+use domain::WorkflowTimestamp;
 use lambda_runtime::{Error, LambdaEvent, run, service_fn};
+use storage::dynamodb::DynamoDbStore;
 use telegram::webhook::WebhookVerifier;
 #[cfg(test)]
 use webhook_function::WebhookResponse;
+use webhook_function::dispatch::{
+    DispatchOutcome, WorkflowDispatchService, WorkflowKind, WorkflowStartRequest, WorkflowStarter,
+};
 use webhook_function::{ApiGatewayEvent, ApiGatewayResponse, process_webhook};
 
-// ── Lambda entry point ─────────────────────────────────────────────────
+struct AwsWorkflowStarter {
+    client: StepFunctionsClient,
+    quotation_arn: String,
+    calendar_arn: String,
+    email_arn: String,
+}
+
+impl WorkflowStarter for AwsWorkflowStarter {
+    type Error = String;
+
+    async fn start(
+        &self,
+        kind: WorkflowKind,
+        request: &WorkflowStartRequest,
+    ) -> Result<(), Self::Error> {
+        let state_machine_arn = match kind {
+            WorkflowKind::Quotation => &self.quotation_arn,
+            WorkflowKind::Calendar => &self.calendar_arn,
+            WorkflowKind::Email => &self.email_arn,
+        };
+        let input = serde_json::to_string(request)
+            .map_err(|_| "workflow start request serialization failed".to_owned())?;
+        self.client
+            .start_execution()
+            .state_machine_arn(state_machine_arn)
+            .name(&request.workflow_id)
+            .input(input)
+            .send()
+            .await
+            .map_err(|_| "Step Functions start_execution failed".to_owned())?;
+        Ok(())
+    }
+}
+
+type AwsDispatcher = WorkflowDispatchService<DynamoDbStore, AwsWorkflowStarter>;
 
 async fn handler(
     event: LambdaEvent<ApiGatewayEvent>,
     verifier: &Arc<WebhookVerifier>,
+    dispatcher: &AwsDispatcher,
 ) -> Result<ApiGatewayResponse, Error> {
-    let response = process_webhook(&event.payload, verifier.as_ref()).into_api_gateway();
+    let response = process_webhook(&event.payload, verifier.as_ref());
+    if let webhook_function::WebhookResponse::Accepted(accepted) = &response {
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_secs());
+        match dispatcher
+            .dispatch(
+                &accepted.normalized,
+                WorkflowTimestamp::from_unix_seconds(timestamp),
+            )
+            .await
+        {
+            Ok(DispatchOutcome::Started | DispatchOutcome::Existing | DispatchOutcome::Ignored) => {
+            }
+            Err(error) => {
+                eprintln!("webhook dispatch failed: {error}");
+                let response = ApiGatewayResponse {
+                    status_code: 503,
+                    headers: [("Content-Type".to_owned(), "application/json".to_owned())]
+                        .into_iter()
+                        .collect(),
+                    body: r#"{"error":"dispatch_unavailable"}"#.to_owned(),
+                };
+                emit_edge_metric("Webhook", response.status_code);
+                return Ok(response);
+            }
+        }
+    }
+    let response = response.into_api_gateway();
     emit_edge_metric("Webhook", response.status_code);
     Ok(response)
 }
@@ -24,12 +93,74 @@ async fn main() -> Result<(), Error> {
     let secret_token = std::env::var("TELEGRAM_SECRET_TOKEN")
         .map_err(|_| "TELEGRAM_SECRET_TOKEN environment variable is not set")?;
     let verifier = Arc::new(WebhookVerifier::new(secret_token));
+    let dispatcher = Arc::new(build_dispatcher().await?);
 
     run(service_fn(move |event| {
         let verifier = Arc::clone(&verifier);
-        async move { handler(event, &verifier).await }
+        let dispatcher = Arc::clone(&dispatcher);
+        async move { handler(event, &verifier, &dispatcher).await }
     }))
     .await
+}
+
+async fn build_dispatcher() -> Result<AwsDispatcher, Error> {
+    let environment = required_env("ENVIRONMENT")?;
+    let application_table = required_env("APPLICATION_TABLE")?;
+    let sdk_config = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
+    let page_token_key = load_page_token_key(&sdk_config).await?;
+
+    let mut dynamodb_config = aws_sdk_dynamodb::config::Builder::from(&sdk_config);
+    if let Ok(endpoint) = std::env::var("DYNAMODB_ENDPOINT") {
+        dynamodb_config = dynamodb_config.endpoint_url(endpoint);
+    }
+    let repository = DynamoDbStore::new(
+        aws_sdk_dynamodb::Client::from_conf(dynamodb_config.build()),
+        application_table,
+        environment,
+        page_token_key,
+    )?;
+
+    let mut sfn_config = aws_sdk_sfn::config::Builder::from(&sdk_config);
+    if let Ok(endpoint) = std::env::var("STEPFUNCTIONS_ENDPOINT") {
+        sfn_config = sfn_config.endpoint_url(endpoint);
+    }
+    let starter = AwsWorkflowStarter {
+        client: StepFunctionsClient::from_conf(sfn_config.build()),
+        quotation_arn: required_env("QUOTATION_STATE_MACHINE_ARN")?,
+        calendar_arn: required_env("CALENDAR_STATE_MACHINE_ARN")?,
+        email_arn: required_env("EMAIL_STATE_MACHINE_ARN")?,
+    };
+    Ok(WorkflowDispatchService::new(repository, starter))
+}
+
+fn required_env(name: &str) -> Result<String, Error> {
+    std::env::var(name).map_err(|_| format!("{name} environment variable is not set").into())
+}
+
+async fn load_page_token_key(sdk_config: &aws_config::SdkConfig) -> Result<[u8; 32], Error> {
+    if let Ok(value) = std::env::var("PAGE_TOKEN_SIGNING_KEY_HEX") {
+        return decode_page_token_key(&value);
+    }
+    let parameter_name = required_env("PAGE_TOKEN_SIGNING_KEY_PARAMETER")?;
+    let output = aws_sdk_ssm::Client::new(sdk_config)
+        .get_parameter()
+        .name(parameter_name)
+        .with_decryption(true)
+        .send()
+        .await
+        .map_err(|_| "page-token signing key parameter could not be loaded")?;
+    let value = output
+        .parameter()
+        .and_then(|parameter| parameter.value())
+        .ok_or("page-token signing key parameter is empty")?;
+    decode_page_token_key(value)
+}
+
+fn decode_page_token_key(value: &str) -> Result<[u8; 32], Error> {
+    let decoded = hex::decode(value).map_err(|_| "page-token signing key must be hex")?;
+    decoded
+        .try_into()
+        .map_err(|_| "page-token signing key must encode exactly 32 bytes".into())
 }
 
 fn emit_edge_metric(kind: &'static str, status_code: u16) {

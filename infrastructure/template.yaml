@@ -24,6 +24,26 @@ Parameters:
       loader, Task 11A). The parameter value is provisioned out-of-band; the
       template only grants read access and never embeds secret material.
     Default: /novus/development/config
+  PageTokenSigningKeyParameter:
+    Type: String
+    Description: SSM SecureString path containing a 32-byte hex pagination signing key.
+    Default: /novus/development/storage/page-token-key
+  GoogleOAuthClientId:
+    Type: String
+    Description: Environment-specific Google OAuth Web client ID.
+    Default: sanitized-development-client.apps.googleusercontent.com
+  GoogleOAuthRedirectUri:
+    Type: String
+    Description: Exact environment-specific Google OAuth callback URI.
+    Default: https://dev.example.test/oauth/google/callback
+  GoogleOAuthClientSecretParameter:
+    Type: String
+    Description: SSM SecureString path containing the Google OAuth client secret.
+    Default: /novus/development/google/client-secret
+  SmtpCredentialsParameter:
+    Type: String
+    Description: SSM SecureString path containing JSON SMTP username/password fields.
+    Default: /novus/development/smtp/credentials
 
 Conditions:
   IsProduction: !Equals [!Ref EnvironmentName, production]
@@ -194,6 +214,12 @@ Resources:
       Role: !GetAtt FunctionsIamStack.Outputs.WebhookRoleArn
       MemorySize: 256
       Timeout: 10
+      Environment:
+        Variables:
+          PAGE_TOKEN_SIGNING_KEY_PARAMETER: !Ref PageTokenSigningKeyParameter
+          QUOTATION_STATE_MACHINE_ARN: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:novus-${EnvironmentName}-quotation"
+          CALENDAR_STATE_MACHINE_ARN: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:novus-${EnvironmentName}-calendar"
+          EMAIL_STATE_MACHINE_ARN: !Sub "arn:${AWS::Partition}:states:${AWS::Region}:${AWS::AccountId}:stateMachine:novus-${EnvironmentName}-email"
       Events:
         TelegramWebhook:
           Type: Api
@@ -213,6 +239,11 @@ Resources:
       Role: !GetAtt FunctionsIamStack.Outputs.OAuthRoleArn
       MemorySize: 256
       Timeout: 15
+      Environment:
+        Variables:
+          OAUTH_CLIENT_ID: !Ref GoogleOAuthClientId
+          OAUTH_REDIRECT_URI: !Ref GoogleOAuthRedirectUri
+          OAUTH_CLIENT_SECRET_PARAMETER: !Ref GoogleOAuthClientSecretParameter
       Events:
         Authorize:
           Type: Api
@@ -225,7 +256,7 @@ Resources:
           Properties:
             RestApiId: !Ref EdgeApi
             Method: GET
-            Path: /oauth/callback/{participantId}
+            Path: /oauth/google/callback
 
   AttachmentCollectionFunction:
     Type: AWS::Serverless::Function
@@ -310,6 +341,12 @@ Resources:
       Role: !GetAtt FunctionsIamStack.Outputs.EmailActionsRoleArn
       MemorySize: 512
       Timeout: 60
+      Environment:
+        Variables:
+          HOSTINGER_SMTP_HOST: smtp.hostinger.com
+          HOSTINGER_SMTP_PORT: "587"
+          HOSTINGER_SMTP_SECURITY: starttls
+          SMTP_CREDENTIALS_PARAMETER: !Ref SmtpCredentialsParameter
 
   CostGuardIntakeFunction:
     Type: AWS::Serverless::Function
