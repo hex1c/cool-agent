@@ -1,5 +1,5 @@
 {
-  "Comment": "Email workflow: intake \u2192 extraction \u2192 drafting \u2192 clarification \u2192 confirmation \u2192 SMTP send (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths. Ambiguous SMTP outcomes enter manual review, never automatic retry.",
+  "Comment": "Email workflow: intake → extraction → drafting → clarification → confirmation → SMTP send (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths. Ambiguous SMTP outcomes enter manual review, never automatic retry.",
   "StartAt": "ReserveIntakeBudget",
   "TimeoutSeconds": 86400,
   "States": {
@@ -293,11 +293,6 @@
         "Payload.$": "$.emailResult"
       },
       "End": true
-    },
-    "IntakeFailed": {
-      "Type": "Fail",
-      "Cause": "Webhook intake failed after retries",
-      "Error": "IntakeFailed"
     },
     "AttachmentFailed": {
       "Type": "Fail",

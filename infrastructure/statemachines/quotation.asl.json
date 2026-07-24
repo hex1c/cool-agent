@@ -1,5 +1,5 @@
 {
-  "Comment": "Quotation workflow: intake \u2192 extraction \u2192 calculation \u2192 clarification \u2192 confirmation \u2192 Sheet/Doc creation \u2192 PDF render \u2192 artifact delivery (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths.",
+  "Comment": "Quotation workflow: intake → extraction → calculation → clarification → confirmation → Sheet/Doc creation → PDF render → artifact delivery (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths.",
   "StartAt": "ReserveIntakeBudget",
   "TimeoutSeconds": 86400,
   "States": {
@@ -377,11 +377,6 @@
         "Payload.$": "$.deliveryResult"
       },
       "End": true
-    },
-    "IntakeFailed": {
-      "Type": "Fail",
-      "Cause": "Webhook intake failed after retries",
-      "Error": "IntakeFailed"
     },
     "AttachmentFailed": {
       "Type": "Fail",

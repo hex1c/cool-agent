@@ -1,5 +1,5 @@
 {
-  "Comment": "Calendar workflow: intake \u2192 extraction \u2192 drafting \u2192 clarification \u2192 confirmation \u2192 Calendar event creation (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths.",
+  "Comment": "Calendar workflow: intake → extraction → drafting → clarification → confirmation → Calendar event creation (Task 38). Standard workflow with durable human waits, task-token resume, three-attempt retries, and terminal failure paths.",
   "StartAt": "ReserveIntakeBudget",
   "TimeoutSeconds": 86400,
   "States": {
@@ -293,11 +293,6 @@
         "Payload.$": "$.calendarResult"
       },
       "End": true
-    },
-    "IntakeFailed": {
-      "Type": "Fail",
-      "Cause": "Webhook intake failed after retries",
-      "Error": "IntakeFailed"
     },
     "AttachmentFailed": {
       "Type": "Fail",
