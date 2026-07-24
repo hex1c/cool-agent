@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "main": "dist/src/index.js",
-  "files": ["dist/src"],
+  "files": ["dist/src", "AGENTS.md", "skills"],
   "scripts": {
     "build": "node node_modules/typescript-compiler/bin/tsc -p tsconfig.json",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",

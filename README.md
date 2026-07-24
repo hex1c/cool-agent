@@ -51,7 +51,7 @@ The local sandbox uses only fake credentials and sanitized fixtures. It never ca
 git clone https://github.com/hex1c/cool-agent.git
 cd cool-agent
 
-corepack pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile
 
 docker compose -f infrastructure/local/docker-compose.yaml up -d
 docker compose -f infrastructure/local/docker-compose.yaml ps -a
@@ -104,11 +104,11 @@ cargo nextest run --workspace --all-features
 Use pnpm from the repository root:
 
 ```bash
-corepack pnpm install --frozen-lockfile
-corepack pnpm --filter @novus/agent-harness format:check
-corepack pnpm --filter @novus/agent-harness lint
-corepack pnpm --filter @novus/agent-harness test
-corepack pnpm --filter @novus/agent-harness build
+pnpm install --frozen-lockfile
+pnpm --filter @novus/agent-harness format:check
+pnpm --filter @novus/agent-harness lint
+pnpm --filter @novus/agent-harness test
+pnpm --filter @novus/agent-harness build
 ```
 
 ### AWS SAM package
