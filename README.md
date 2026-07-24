@@ -125,11 +125,17 @@ SAM builds require `cargo-lambda`, Zig 0.13.0, Node.js 22, and pnpm.
 ### Short answer
 
 - **Credential-free local sandbox:** no credential file is required.
-- **Local checks against real providers:** use the conventional root **`.env`** file.
-- **Deployed environments:** store runtime secrets in **AWS Systems Manager Parameter Store `SecureString` parameters**. Do not put secret values in YAML or commit them.
-- **AWS deployment identity:** use the normal AWS CLI credential chain (for example an SSO/profile or deployment-role environment variables), not `.env`.
+- **Local checks against real providers:** use the conventional root **`.env`**
+  file.
+- **Deployed environments:** store runtime secrets in AWS Systems Manager
+  Parameter Store `SecureString` parameters. Do not put secret values in YAML
+  or commit them.
+- **AWS deployment identity:** use the normal AWS CLI credential chain, such as
+  an SSO profile or deployment-role variables, not `.env`.
 
-The repository provides a safe, tracked [`.env.example`](.env.example). The real `.env` file is ignored by Git and is read only by [`scripts/verify-phase0-credentials.py`](scripts/verify-phase0-credentials.py); the deployed application does not load local dotenv files.
+The repository provides a safe, tracked [`.env.example`](.env.example). The real
+`.env` file is ignored by Git. It is consumed by the credential preflight and
+local run harness; the deployed application does not load local dotenv files.
 
 ### Local provider credential file
 
@@ -140,7 +146,9 @@ cp .env.example .env
 chmod 600 .env
 ```
 
-Fill in only the Telegram, Google OAuth, and Hostinger values you want to verify. Never commit `.env`. Process environment variables override values from the file.
+Fill in only the Telegram, Google OAuth, and Hostinger values you want to
+verify. Never commit `.env`. Process environment variables override values from
+the file.
 
 Run the non-mutating preflight checks:
 
@@ -159,6 +167,94 @@ Legacy ignored files are also supported:
 - `googleoauth`: downloaded Google **Web application** OAuth JSON
 
 Prefer `.env` for new setups. Use `--env-file PATH` only when a separate credential file is required.
+
+### Local run harness
+
+[`scripts/local-run.sh`](scripts/local-run.sh) safely loads the root `.env`
+without evaluating it as shell code. Variables already present in the process
+environment take precedence. It maps local names to the names expected by the
+Lambda handlers:
+
+- `GEMINI_API_KEY` → `NOVUS_AI_PROVIDER_KEY`
+- `TELEGRAM_WEBHOOK_SECRET` → `TELEGRAM_SECRET_TOKEN`
+- `GOOGLE_OAUTH_CLIENT_ID` → `OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_REDIRECT_URI` → `OAUTH_REDIRECT_URI`
+
+Set up and inspect the redacted configuration:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+# Fill the providers needed for the test.
+scripts/local-run.sh check
+scripts/local-run.sh preflight
+```
+
+Run arbitrary development commands with the same environment:
+
+```bash
+scripts/local-run.sh run -- pnpm --filter @novus/agent-harness test
+```
+
+Build and start the local SAM webhook/OAuth API:
+
+```bash
+scripts/local-run.sh sam-build
+scripts/local-run.sh sam-api
+```
+
+To receive Telegram updates, leave that process running and open two more
+terminals. Start a Cloudflare Quick Tunnel in the second terminal:
+
+```bash
+scripts/local-run.sh telegram-tunnel
+```
+
+Copy the printed `https://...trycloudflare.com` URL and register it in the third
+terminal. The command appends `/webhook` and sends the configured
+`TELEGRAM_WEBHOOK_SECRET` as Telegram's webhook secret:
+
+```bash
+scripts/local-run.sh telegram-set-webhook https://example.trycloudflare.com
+```
+
+Remove the provider webhook when the local session ends:
+
+```bash
+scripts/local-run.sh telegram-delete-webhook
+```
+
+Invoke the agent Lambda with an AI request fixture:
+
+```bash
+scripts/local-run.sh sam-agent /path/to/ai-request.json
+```
+
+Set `NOVUS_ENV_FILE=/path/to/file` to select another ignored dotenv file. The
+harness creates a temporary mode-`0600` SAM environment JSON and removes it on
+exit.
+
+For a fully automated Telegram setup, run `sam-api` in one terminal and
+`telegram-dev` in another. It starts a Cloudflare Quick Tunnel, captures the
+public HTTPS URL, registers the webhook with Telegram, and cleans up on
+Ctrl-C:
+
+```bash
+scripts/local-run.sh sam-api        # terminal 1
+scripts/local-run.sh telegram-dev   # terminal 2
+```
+
+The local API exposes the current webhook verifier and OAuth flow. Receiving a
+Telegram update currently proves webhook verification and normalization only;
+the webhook Lambda does not dispatch the complete workflow or reply to the
+chat.
+
+The OAuth Lambda uses `StubTokenEndpoint` and `StubRefreshTokenStore`, so it does
+not send the configured client secret to Google or persist a real refresh token.
+Google/email action Lambda binaries return `adapter_not_configured` and do not
+construct real Drive/Calendar/SMTP clients. Supplying credentials cannot enable
+code paths that have not been wired yet. The Docker sandbox remains the
+supported end-to-end contract test for those adapters.
 
 ### Non-secret configuration files
 
@@ -230,6 +326,7 @@ Read [`docs/deployment/runbook.md`](docs/deployment/runbook.md) before deploying
 
 - [Product specification](docs/prd/telegram-operations-worker.md)
 - [Local sandbox](docs/development/local-sandbox.md)
+- [Local vs production runtime](docs/development/local-vs-production.md)
 - [Deployment runbook](docs/deployment/runbook.md)
 - [DynamoDB key design](docs/architecture/dynamodb-keys.md)
 - [AWS cost forecast](docs/cost/aws-monthly-forecast.md)

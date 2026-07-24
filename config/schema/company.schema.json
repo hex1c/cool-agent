@@ -7,7 +7,7 @@
   "properties": {
     "schemaVersion": { "const": "novus.config.v1" },
     "kind": { "enum": ["company", "environment"] },
-    "environment": { "enum": ["development", "staging", "production"] },
+    "environment": { "enum": ["development", "staging", "production", "local"] },
     "company": { "$ref": "#/$defs/company" },
     "quotation": { "$ref": "#/$defs/quotation" },
     "drive": { "$ref": "#/$defs/drive" },
@@ -357,7 +357,7 @@
       "properties": {
         "clientId": { "type": "string", "minLength": 1 },
         "clientSecretRef": { "$ref": "#/$defs/secretRef" },
-        "callbackUri": { "type": "string", "pattern": "^https://" },
+        "callbackUri": { "type": "string", "pattern": "^https://|^http://localhost:" },
         "scopes": {
           "type": "array",
           "minItems": 4,
@@ -368,7 +368,7 @@
     },
     "secretRef": {
       "type": "string",
-      "pattern": "^/novus/(development|staging|production)/[A-Za-z0-9/_-]+$"
+      "pattern": "^/novus/(development|staging|production|local)/[A-Za-z0-9/_-]+$"
     }
   }
 }

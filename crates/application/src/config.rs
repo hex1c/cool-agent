@@ -28,6 +28,9 @@ pub enum Environment {
     Development,
     Staging,
     Production,
+    /// Local real-provider development. Not deployed via SAM; secrets are
+    /// resolved from the process environment (`.env`) rather than SSM.
+    Local,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
