@@ -156,6 +156,7 @@ fn environment_name(environment: &Environment) -> &'static str {
         Environment::Development => "development",
         Environment::Staging => "staging",
         Environment::Production => "production",
+        Environment::Local => "local",
     }
 }
 

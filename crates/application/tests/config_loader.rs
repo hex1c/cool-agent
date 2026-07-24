@@ -23,6 +23,7 @@ fn config_loader_validates_all_environment_overrides() {
         ("dev.yaml", Environment::Development),
         ("staging.yaml", Environment::Staging),
         ("production.yaml", Environment::Production),
+        ("local.yaml", Environment::Local),
     ] {
         let config = application::config_loader::load_config(
             repository_file("config/company.yaml"),
