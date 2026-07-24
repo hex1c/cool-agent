@@ -6,7 +6,7 @@ Resources:
   RustBuildSpike:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: ../../functions/build-spike
+      CodeUri: .
       Runtime: provided.al2023
       Handler: bootstrap
       MemorySize: 128

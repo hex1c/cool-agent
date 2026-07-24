@@ -1,37 +1,25 @@
-[workspace]
-
 [package]
 name = "workflow-actions-functions"
 version = "0.1.0"
-edition = "2024"
-rust-version = "1.97"
-publish = false
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
 
 [dependencies]
-aws-config = "=1.8.11"
-aws-sdk-dynamodb = { version = "=1.117.0", features = ["behavior-version-latest"] }
-lambda_runtime = "0.14"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-base64 = "0.22"
-sha2 = "=0.11.0"
-hex = "0.4"
-tokio = { version = "1.43", features = ["macros", "rt-multi-thread"] }
-application = { path = "../../crates/application" }
-pdf = { path = "../../crates/pdf" }
-domain = { path = "../../crates/domain" }
-storage = { path = "../../crates/storage" }
-time = { version = "=0.3.54", features = ["formatting", "macros"] }
+aws-config.workspace = true
+aws-sdk-dynamodb.workspace = true
+lambda_runtime.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+base64.workspace = true
+sha2.workspace = true
+hex.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+application.workspace = true
+pdf.workspace = true
+domain.workspace = true
+storage.workspace = true
+time = { workspace = true, features = ["formatting", "macros"] }
 
-[lints.rust]
-unsafe_code = "deny"
-warnings = "deny"
-
-[lints.clippy]
-all = "deny"
-unwrap_used = "deny"
-expect_used = "deny"
-panic = "deny"
-todo = "deny"
-unimplemented = "deny"
-"indexing_slicing" = "deny"
+[lints]
+workspace = true

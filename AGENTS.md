@@ -81,18 +81,19 @@ For Rust projects:
 * Run the narrowest relevant test first instead of repeatedly running the full
   workspace test suite.
 
-Rust workspace dependencies:
+Rust workspace dependencies (hard rule — no exceptions):
 
-* Declare every shared dependency version ONCE in the root `Cargo.toml`
-  `[workspace.dependencies]` table. This is the single source of truth for
-  versions, features, and path crates across the workspace.
-* In member crates, reference workspace-managed deps with
-  `dep.workspace = true` (add per-crate `features` inline when needed:
-  `tokio = { workspace = true, features = ["rt-multi-thread"] }`).
-* Do NOT re-declare inline `version = "..."` for any dependency that already
-  exists in `[workspace.dependencies]`.
-* `scripts/check-workspace-deps.py` enforces this and runs in CI; run it
-  locally after touching any `Cargo.toml`.
+* Every first-party Rust package under `crates/`, `functions/`, or `tests/` MUST
+  be a member of the root workspace. Nested `[workspace]` tables are forbidden.
+* Declare EVERY dependency version exactly ONCE in the root `Cargo.toml`
+  `[workspace.dependencies]` table, even when only one package uses it. This is
+  the single source of truth for versions, features, and path crates.
+* Every member dependency MUST use `dep.workspace = true`; direct versions and
+  direct `path = ...` declarations in member manifests are forbidden. Add only
+  package-specific features inline when needed:
+  `tokio = { workspace = true, features = ["rt-multi-thread"] }`.
+* `scripts/check-workspace-deps.py` enforces membership and centralization in CI;
+  run it locally after touching any `Cargo.toml`.
 * Trim unused dependencies with `cargo machete --with-metadata .` and remove
   only genuinely-unused deps (verify with `cargo check` / tests — machete is
   imprecise and produces false positives for macro-driven crates).
