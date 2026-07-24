@@ -59,8 +59,6 @@ Keep the final response under 150 words unless more detail is explicitly request
 For Node.js and TypeScript projects:
 
 * Use pnpm exclusively; do not use npm or Yarn.
-* pnpm is available via corepack: `corepack pnpm <cmd>`. If `pnpm` is not
-  directly in PATH, prefix commands with `corepack`.
 * Install dependencies from the repository root with
   `pnpm install --frozen-lockfile`.
 * Run package-specific scripts with `pnpm --filter <package-name> <script>`.

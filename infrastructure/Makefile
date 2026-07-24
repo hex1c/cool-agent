@@ -54,7 +54,7 @@ build-CostGuardIntakeFunction build-CostGuardAiFunction build-CostGuardExternalF
 	$(call cargo-lambda-bin,cost_guard,$(REPO_ROOT)/functions/workflow-actions)
 
 build-AgentHarnessFunction:
-	cd "$(REPO_ROOT)" && corepack pnpm install --frozen-lockfile
-	cd "$(REPO_ROOT)" && corepack pnpm --filter @novus/agent-harness build
+	cd "$(REPO_ROOT)" && pnpm install --frozen-lockfile
+	cd "$(REPO_ROOT)" && pnpm --filter @novus/agent-harness build
 	rm -rf "$(ARTIFACTS_DIR)"
-	cd "$(REPO_ROOT)" && corepack pnpm --filter @novus/agent-harness deploy --prod --legacy "$(ARTIFACTS_DIR)"
+	cd "$(REPO_ROOT)" && pnpm --filter @novus/agent-harness deploy --prod --legacy "$(ARTIFACTS_DIR)"
