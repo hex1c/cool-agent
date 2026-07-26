@@ -14,7 +14,7 @@ pub mod privacy;
 pub mod webhook;
 
 pub use callbacks::{CallbackData, CallbackValidationError, validate_callback_against_pending};
-pub use client::TelegramBot;
+pub use client::{ReqwestTelegramBot, TelegramBot, TelegramBotError};
 pub use commands::{CommandParseError, TopicCommand, parse_topic_command};
 pub use delivery::{DeliveryOutcome, PrivacyViolation, PrivateDelivery, TopicDelivery};
 pub use normalize::{EventKind, MediaKind, NormalizeError, NormalizedUpdate};

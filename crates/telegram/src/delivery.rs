@@ -74,14 +74,15 @@ impl<B: TelegramBot> TopicDelivery<B> {
     ///
     /// Returns [`PrivacyViolation`] if the payload is classified as
     /// OAuth-bearing.
-    pub fn send(&self, text: &str) -> Result<DeliveryOutcome, PrivacyViolation> {
+    pub async fn send(&self, text: &str) -> Result<DeliveryOutcome, PrivacyViolation> {
         let classification = classify_payload(text);
         if matches!(classification, PayloadClassification::OAuthBearing) {
             return Err(PrivacyViolation { classification });
         }
         Ok(send_with_retry(self.retry_policy, || {
             self.bot.send_message(self.session.chat_id(), text)
-        }))
+        })
+        .await)
     }
 }
 
@@ -98,17 +99,19 @@ impl<B: TelegramBot> PrivateDelivery<B> {
     /// Send an OAuth-bearing message with retry.
     ///
     /// This is the only path for OAuth URLs, codes, and tokens.
-    pub fn send_oauth(&self, text: &str) -> DeliveryOutcome {
+    pub async fn send_oauth(&self, text: &str) -> DeliveryOutcome {
         send_with_retry(self.retry_policy, || {
             self.bot.send_message(self.chat_id, text)
         })
+        .await
     }
 
     /// Send a topic-safe message through the private channel.
-    pub fn send_topic_safe(&self, text: &str) -> DeliveryOutcome {
+    pub async fn send_topic_safe(&self, text: &str) -> DeliveryOutcome {
         send_with_retry(self.retry_policy, || {
             self.bot.send_message(self.chat_id, text)
         })
+        .await
     }
 
     /// Access the chat id this delivery targets.
@@ -121,15 +124,15 @@ impl<B: TelegramBot> PrivateDelivery<B> {
 ///
 /// Uses zero jitter (deterministic delays) so that tests are reproducible.
 /// The jitter sample of 0 is always valid for `JitterSample`.
-fn send_with_retry<E: std::error::Error>(
+async fn send_with_retry<E: std::error::Error, Fut: std::future::Future<Output = Result<(), E>>>(
     retry_policy: RetryPolicy,
-    mut send_fn: impl FnMut() -> Result<(), E>,
+    mut send_fn: impl FnMut() -> Fut,
 ) -> DeliveryOutcome {
     let mut attempts: u8 = 0;
 
     loop {
         attempts = attempts.saturating_add(1);
-        match send_fn() {
+        match send_fn().await {
             Ok(()) => return DeliveryOutcome::Sent,
             Err(e) => {
                 let last_error_label = e.to_string();
@@ -216,7 +219,7 @@ mod tests {
     impl TelegramBot for MockBot {
         type Error = MockError;
 
-        fn send_message(&self, _chat_id: ChatId, _text: &str) -> Result<(), Self::Error> {
+        async fn send_message(&self, _chat_id: ChatId, _text: &str) -> Result<(), Self::Error> {
             let count = self.call_count.get();
             self.call_count.set(count + 1);
             if count < self.succeed_after_failures {
@@ -227,7 +230,7 @@ mod tests {
             }
         }
 
-        fn get_chat_member(
+        async fn get_chat_member(
             &self,
             _chat_id: ChatId,
             _user_id: ParticipantId,
@@ -247,56 +250,60 @@ mod tests {
         )
     }
 
-    #[test]
-    fn topic_delivery_sends_topic_safe_message() {
+    #[tokio::test]
+    async fn topic_delivery_sends_topic_safe_message() {
         let bot = MockBot::new(0);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
         let outcome = delivery
             .send("Stage 2 complete: quotation draft ready.")
+            .await
             .expect("topic-safe");
         assert_eq!(outcome, DeliveryOutcome::Sent);
     }
 
-    #[test]
-    fn topic_delivery_refuses_oauth_bearing_payload() {
+    #[tokio::test]
+    async fn topic_delivery_refuses_oauth_bearing_payload() {
         let bot = MockBot::new(0);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let result = delivery.send("Here is your OAuth access token: ya29.abc123");
+        let result = delivery
+            .send("Here is your OAuth access token: ya29.abc123")
+            .await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn private_delivery_sends_oauth_bearing_message() {
+    #[tokio::test]
+    async fn private_delivery_sends_oauth_bearing_message() {
         let bot = MockBot::new(0);
         let delivery = PrivateDelivery::new(bot, ChatId::new(12345), default_retry_policy());
         let outcome = delivery
-            .send_oauth("Your OAuth connect link: https://accounts.google.com/o/oauth2/auth?...");
+            .send_oauth("Your OAuth connect link: https://accounts.google.com/o/oauth2/auth?...")
+            .await;
         assert_eq!(outcome, DeliveryOutcome::Sent);
     }
 
-    #[test]
-    fn retry_eventually_succeeds() {
+    #[tokio::test]
+    async fn retry_eventually_succeeds() {
         let bot = MockBot::new(2); // succeeds on 3rd call (0,1 fail; 2 succeeds)
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let outcome = delivery.send("status update").expect("topic-safe");
+        let outcome = delivery.send("status update").await.expect("topic-safe");
         assert_eq!(outcome, DeliveryOutcome::Sent);
     }
 
-    #[test]
-    fn retry_exhausts_and_reports_terminal_failure() {
+    #[tokio::test]
+    async fn retry_exhausts_and_reports_terminal_failure() {
         let bot = MockBot::new(99); // never succeeds within 3 attempts
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let outcome = delivery.send("update").expect("topic-safe");
+        let outcome = delivery.send("update").await.expect("topic-safe");
         assert!(
             matches!(outcome, DeliveryOutcome::TerminalFailure { attempts, .. } if attempts == MAX_EXTERNAL_OPERATION_ATTEMPTS)
         );
     }
 
-    #[test]
-    fn terminal_failure_carries_last_error_label() {
+    #[tokio::test]
+    async fn terminal_failure_carries_last_error_label() {
         let bot = MockBot::new(99);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let outcome = delivery.send("update").expect("topic-safe");
+        let outcome = delivery.send("update").await.expect("topic-safe");
         assert!(
             matches!(outcome, DeliveryOutcome::TerminalFailure { ref last_error_label, .. } if last_error_label.contains("mock error")),
             "expected TerminalFailure with mock error, got {outcome:?}"

@@ -20,6 +20,7 @@ application.workspace = true
 pdf.workspace = true
 domain.workspace = true
 storage.workspace = true
+telegram.workspace = true
 time = { workspace = true, features = ["formatting", "macros"] }
 
 [lints]
