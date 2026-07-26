@@ -106,6 +106,16 @@ pub fn confirmation(
     Ok((pk, sk))
 }
 
+/// Produce the partition key and sort key for a pending Step Functions
+/// task token associated with a workflow.
+pub fn task_token(workflow_id: &WorkflowId) -> Result<(String, String), KeyError> {
+    let pk = format!("WF#{}", workflow_id);
+    let sk = "TASK_TOKEN".to_owned();
+    validate_key_component("task token pk", &pk, MAX_PARTITION_KEY_LENGTH)?;
+    validate_key_component("task token sk", &sk, MAX_SORT_KEY_LENGTH)?;
+    Ok((pk, sk))
+}
+
 /// Return the stable snake_case representation used in DynamoDB keys.
 fn operation_kind_key(kind: OperationKind) -> &'static str {
     match kind {
