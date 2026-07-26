@@ -80,7 +80,7 @@ impl std::error::Error for MockError {}
 impl TelegramBot for MockBot {
     type Error = MockError;
 
-    fn send_message(&self, _chat_id: ChatId, _text: &str) -> Result<(), Self::Error> {
+    async fn send_message(&self, _chat_id: ChatId, _text: &str) -> Result<(), Self::Error> {
         let count = self.call_count.get();
         self.call_count.set(count + 1);
         if count < self.succeed_after_failures {
@@ -90,7 +90,7 @@ impl TelegramBot for MockBot {
         }
     }
 
-    fn get_chat_member(
+    async fn get_chat_member(
         &self,
         _chat_id: ChatId,
         _user_id: ParticipantId,
@@ -262,16 +262,16 @@ mod delivery_privacy {
         std::fs::read_to_string(&path).expect("failed to read fixture")
     }
 
-    #[test]
-    fn topic_delivery_refuses_oauth_access_token() {
+    #[tokio::test]
+    async fn topic_delivery_refuses_oauth_access_token() {
         let bot = MockBot::new(0);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let result = delivery.send("access_token: ya29.something");
+        let result = delivery.send("access_token: ya29.something").await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn topic_delivery_refuses_google_oauth_url() {
+    #[tokio::test]
+    async fn topic_delivery_refuses_google_oauth_url() {
         let fixture = load_fixture("oauth_payload");
         let parsed: serde_json::Value = serde_json::from_str(&fixture).expect("valid json fixture");
         let url = parsed
@@ -281,12 +281,12 @@ mod delivery_privacy {
 
         let bot = MockBot::new(0);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let result = delivery.send(url);
+        let result = delivery.send(url).await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn topic_delivery_refuses_authorization_code() {
+    #[tokio::test]
+    async fn topic_delivery_refuses_authorization_code() {
         let fixture = load_fixture("oauth_payload");
         let parsed: serde_json::Value = serde_json::from_str(&fixture).expect("valid json fixture");
         let code = parsed
@@ -296,20 +296,20 @@ mod delivery_privacy {
 
         let bot = MockBot::new(0);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let result = delivery.send(code);
+        let result = delivery.send(code).await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn topic_delivery_refuses_oauth_command() {
+    #[tokio::test]
+    async fn topic_delivery_refuses_oauth_command() {
         let bot = MockBot::new(0);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let result = delivery.send("/connect_google");
+        let result = delivery.send("/connect_google").await;
         assert!(result.is_err());
     }
 
-    #[test]
-    fn private_delivery_accepts_oauth_bearing_payloads() {
+    #[tokio::test]
+    async fn private_delivery_accepts_oauth_bearing_payloads() {
         let fixture = load_fixture("oauth_payload");
         let parsed: serde_json::Value = serde_json::from_str(&fixture).expect("valid json fixture");
 
@@ -334,7 +334,7 @@ mod delivery_privacy {
         for text in &oauth_texts {
             let bot = MockBot::new(0);
             let delivery = PrivateDelivery::new(bot, ChatId::new(12345), default_retry_policy());
-            let outcome = delivery.send_oauth(text);
+            let outcome = delivery.send_oauth(text).await;
             assert!(
                 matches!(outcome, DeliveryOutcome::Sent),
                 "expected Sent for oauth payload, got {outcome:?}"
@@ -342,8 +342,8 @@ mod delivery_privacy {
         }
     }
 
-    #[test]
-    fn topic_delivery_sends_topic_safe_messages() {
+    #[tokio::test]
+    async fn topic_delivery_sends_topic_safe_messages() {
         let topic_safe_texts = [
             "Stage 2 complete: quotation draft ready.",
             "Please review the attached preview.",
@@ -357,7 +357,7 @@ mod delivery_privacy {
         for text in &topic_safe_texts {
             let bot = MockBot::new(0);
             let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-            let outcome = delivery.send(text);
+            let outcome = delivery.send(text).await;
             assert!(
                 matches!(outcome, Ok(DeliveryOutcome::Sent)),
                 "expected Ok(Sent) for topic-safe text {text:?}, got {outcome:?}"
@@ -365,27 +365,27 @@ mod delivery_privacy {
         }
     }
 
-    #[test]
-    fn private_delivery_also_sends_topic_safe_messages() {
+    #[tokio::test]
+    async fn private_delivery_also_sends_topic_safe_messages() {
         let bot = MockBot::new(0);
         let delivery = PrivateDelivery::new(bot, ChatId::new(12345), default_retry_policy());
-        let outcome = delivery.send_topic_safe("Workflow status: complete.");
+        let outcome = delivery.send_topic_safe("Workflow status: complete.").await;
         assert!(matches!(outcome, DeliveryOutcome::Sent));
     }
 
-    #[test]
-    fn topic_delivery_retry_eventually_succeeds() {
+    #[tokio::test]
+    async fn topic_delivery_retry_eventually_succeeds() {
         let bot = MockBot::new(2); // 0,1 fail; 2 succeeds
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let outcome = delivery.send("status update").expect("topic-safe");
+        let outcome = delivery.send("status update").await.expect("topic-safe");
         assert_eq!(outcome, DeliveryOutcome::Sent);
     }
 
-    #[test]
-    fn topic_delivery_reports_terminal_failure_on_exhaustion() {
+    #[tokio::test]
+    async fn topic_delivery_reports_terminal_failure_on_exhaustion() {
         let bot = MockBot::new(99);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let outcome = delivery.send("update").expect("topic-safe");
+        let outcome = delivery.send("update").await.expect("topic-safe");
         assert!(
             matches!(
                 outcome,
@@ -396,19 +396,19 @@ mod delivery_privacy {
         );
     }
 
-    #[test]
-    fn private_delivery_retry_eventually_succeeds() {
+    #[tokio::test]
+    async fn private_delivery_retry_eventually_succeeds() {
         let bot = MockBot::new(1);
         let delivery = PrivateDelivery::new(bot, ChatId::new(12345), default_retry_policy());
-        let outcome = delivery.send_oauth("/connect_google");
+        let outcome = delivery.send_oauth("/connect_google").await;
         assert_eq!(outcome, DeliveryOutcome::Sent);
     }
 
-    #[test]
-    fn privacy_violation_is_typed_error() {
+    #[tokio::test]
+    async fn privacy_violation_is_typed_error() {
         let bot = MockBot::new(0);
         let delivery = TopicDelivery::new(bot, topic_session(), default_retry_policy());
-        let result = delivery.send("Here is an access_token: ya29.xyz");
+        let result = delivery.send("Here is an access_token: ya29.xyz").await;
         assert!(matches!(result, Err(PrivacyViolation { .. })));
     }
 }

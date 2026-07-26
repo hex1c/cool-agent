@@ -31,7 +31,8 @@ pub mod delivery;
 pub mod pdf;
 pub mod workflow;
 
-pub use delivery::{DeliveryEvent, DeliveryResultDto, DeliveryRunner};
+pub use application::artifact_delivery::{DeliveryError, DeliveryRequest, DeliveryResult};
+pub use delivery::{DeliveryEvent, DeliveryResultDto, DeliveryRunner, process_delivery};
 pub use pdf::{PdfRenderError, PdfRenderEvent, PdfRenderResult};
 pub use workflow::{WorkflowActionError, WorkflowActionEvent, WorkflowActionResult};
 

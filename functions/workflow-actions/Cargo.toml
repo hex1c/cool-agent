@@ -8,6 +8,8 @@ publish.workspace = true
 [dependencies]
 aws-config.workspace = true
 aws-sdk-dynamodb.workspace = true
+aws-sdk-s3.workspace = true
+reqwest.workspace = true
 lambda_runtime.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -19,6 +21,7 @@ application.workspace = true
 pdf.workspace = true
 domain.workspace = true
 storage.workspace = true
+telegram.workspace = true
 time = { workspace = true, features = ["formatting", "macros"] }
 
 [lints]
