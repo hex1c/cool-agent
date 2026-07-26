@@ -99,9 +99,14 @@ configure_runtime_environment() {
 	export AWS_REGION=${AWS_REGION:-us-east-1}
 	export AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-$AWS_REGION}
 	export APPLICATION_TABLE=${APPLICATION_TABLE:-novus-development-application}
+	export BUDGET_TABLE=${BUDGET_TABLE:-novus-development-budget}
+	export ARTIFACT_BUCKET=${ARTIFACT_BUCKET:-novus-development-artifacts-local}
 	export DYNAMODB_ENDPOINT=${DYNAMODB_ENDPOINT:-http://host.docker.internal:8000}
+	export S3_ENDPOINT=${S3_ENDPOINT:-http://host.docker.internal:4566}
 	export STEPFUNCTIONS_ENDPOINT=${STEPFUNCTIONS_ENDPOINT:-http://host.docker.internal:8083}
 	export LOCALSTACK_ENDPOINT=${LOCALSTACK_ENDPOINT:-http://host.docker.internal:4566}
+	export PRICING_VERSION=${PRICING_VERSION:-task41-2026-07-23}
+	export PRICING_APPROVAL_ID=${PRICING_APPROVAL_ID:-task41-2026-07-23}
 	export QUOTATION_STATE_MACHINE_ARN=${QUOTATION_STATE_MACHINE_ARN:-arn:aws:states:us-east-1:123456789012:stateMachine:novus-local-quotation}
 	export CALENDAR_STATE_MACHINE_ARN=${CALENDAR_STATE_MACHINE_ARN:-arn:aws:states:us-east-1:123456789012:stateMachine:novus-local-calendar}
 	export EMAIL_STATE_MACHINE_ARN=${EMAIL_STATE_MACHINE_ARN:-arn:aws:states:us-east-1:123456789012:stateMachine:novus-local-email}
@@ -150,6 +155,62 @@ keys = {
         "HOSTINGER_SMTP_PASSWORD", "AWS_ACCESS_KEY_ID",
         "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "AWS_DEFAULT_REGION",
     ),
+    "AttachmentCollectionFunction": (
+        "ENVIRONMENT", "APPLICATION_TABLE", "ARTIFACT_BUCKET",
+        "DYNAMODB_ENDPOINT", "S3_ENDPOINT", "PAGE_TOKEN_SIGNING_KEY_HEX",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "DeliveryFunction": (
+        "ENVIRONMENT", "APPLICATION_TABLE", "ARTIFACT_BUCKET",
+        "DYNAMODB_ENDPOINT", "S3_ENDPOINT", "PAGE_TOKEN_SIGNING_KEY_HEX",
+        "TELEGRAM_BOT_TOKEN", "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET",
+        "OAUTH_CLIENT_SECRET_PARAMETER", "LOCALSTACK_ENDPOINT",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "GoogleActionsFunction": (
+        "ENVIRONMENT", "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET",
+        "OAUTH_CLIENT_SECRET_PARAMETER", "LOCALSTACK_ENDPOINT",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "CalendarActionsFunction": (
+        "ENVIRONMENT", "OAUTH_CLIENT_ID", "OAUTH_CLIENT_SECRET",
+        "OAUTH_CLIENT_SECRET_PARAMETER", "LOCALSTACK_ENDPOINT",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "CostGuardIntakeFunction": (
+        "ENVIRONMENT", "BUDGET_TABLE", "DYNAMODB_ENDPOINT",
+        "OPERATION_CLASS", "PRICING_VERSION", "PRICING_APPROVAL_ID",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "CostGuardAiFunction": (
+        "ENVIRONMENT", "BUDGET_TABLE", "DYNAMODB_ENDPOINT",
+        "OPERATION_CLASS", "PRICING_VERSION", "PRICING_APPROVAL_ID",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "CostGuardExternalFunction": (
+        "ENVIRONMENT", "BUDGET_TABLE", "DYNAMODB_ENDPOINT",
+        "OPERATION_CLASS", "PRICING_VERSION", "PRICING_APPROVAL_ID",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "CostGuardFunction": (
+        "ENVIRONMENT", "BUDGET_TABLE", "DYNAMODB_ENDPOINT",
+        "OPERATION_CLASS", "PRICING_VERSION", "PRICING_APPROVAL_ID",
+        "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+        "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "WorkflowActionFunction": (
+        "ENVIRONMENT", "APPLICATION_TABLE", "DYNAMODB_ENDPOINT",
+        "PAGE_TOKEN_SIGNING_KEY_HEX", "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "AWS_DEFAULT_REGION",
+    ),
+    "PdfRenderFunction": ("ENVIRONMENT",),
 }
 payload = {
     function: {key: os.environ[key] for key in names if os.environ.get(key)}
