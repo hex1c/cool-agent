@@ -124,13 +124,15 @@ async fn build_dispatcher() -> Result<AwsDispatcher, Error> {
     if let Ok(endpoint) = std::env::var("STEPFUNCTIONS_ENDPOINT") {
         sfn_config = sfn_config.endpoint_url(endpoint);
     }
+    let sfn_client = StepFunctionsClient::from_conf(sfn_config.build());
     let starter = AwsWorkflowStarter {
-        client: StepFunctionsClient::from_conf(sfn_config.build()),
+        client: sfn_client.clone(),
         quotation_arn: required_env("QUOTATION_STATE_MACHINE_ARN")?,
         calendar_arn: required_env("CALENDAR_STATE_MACHINE_ARN")?,
         email_arn: required_env("EMAIL_STATE_MACHINE_ARN")?,
     };
-    Ok(WorkflowDispatchService::new(repository, starter))
+    Ok(WorkflowDispatchService::new(repository.clone(), starter)
+        .with_task_token_resume(sfn_client, repository))
 }
 
 fn required_env(name: &str) -> Result<String, Error> {

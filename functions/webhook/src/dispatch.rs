@@ -1,11 +1,14 @@
 use std::fmt::Display;
 
 use application::repositories::{ConditionalWriteOutcome, WorkflowCreation, WorkflowRepository};
+use aws_sdk_dynamodb::types::AttributeValue;
+use aws_sdk_sfn::Client as SfnClient;
 use domain::WorkflowTimestamp;
 use domain::identity::{ParticipantId, WorkflowId};
 use domain::routing::Route;
 use domain::workflow::{Workflow, WorkflowStateKind};
 use serde::Serialize;
+use storage::dynamodb::DynamoDbStore;
 use telegram::normalize::{EventKind, NormalizedUpdate};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,6 +72,8 @@ pub trait WorkflowStarter {
 pub struct WorkflowDispatchService<R, S> {
     repository: R,
     starter: S,
+    sfn_client: Option<SfnClient>,
+    dynamodb: Option<DynamoDbStore>,
 }
 
 impl<R, S> WorkflowDispatchService<R, S>
@@ -80,7 +85,19 @@ where
         Self {
             repository,
             starter,
+            sfn_client: None,
+            dynamodb: None,
         }
+    }
+
+    pub fn with_task_token_resume(
+        mut self,
+        sfn_client: SfnClient,
+        dynamodb: DynamoDbStore,
+    ) -> Self {
+        self.sfn_client = Some(sfn_client);
+        self.dynamodb = Some(dynamodb);
+        self
     }
 
     pub async fn dispatch(
@@ -88,12 +105,39 @@ where
         update: &NormalizedUpdate,
         accepted_at: WorkflowTimestamp,
     ) -> Result<DispatchOutcome, DispatchError> {
+        let Route::ForumTopic { session } = update.route else {
+            return Ok(DispatchOutcome::Ignored);
+        };
+
+        // Handle follow-up commands (Done, Confirm, Stop, Correct) by
+        // resuming a pending Step Functions task token.
+        if let EventKind::Command {
+            command,
+            args,
+            from,
+        } = &update.event
+        {
+            return self
+                .handle_followup_command(&session, command, args.as_deref(), *from, update)
+                .await;
+        }
+
+        // Handle media uploads during attachment collection.
+        if let EventKind::Media { .. } = &update.event {
+            // Media uploads are handled by the attachment collection SFN
+            // task. For now, acknowledge without resuming.
+            return Ok(DispatchOutcome::Ignored);
+        }
+
+        // Handle callbacks (inline keyboard button presses).
+        if let EventKind::Callback { .. } = &update.event {
+            return self.handle_callback(&session, update).await;
+        }
+
+        // New workflow creation from a mention.
         let (instruction, actor) = match &update.event {
             EventKind::Mention { text, from } => (text.as_str(), *from),
             _ => return Ok(DispatchOutcome::Ignored),
-        };
-        let Route::ForumTopic { session } = update.route else {
-            return Ok(DispatchOutcome::Ignored);
         };
 
         if let Some(existing) = self
@@ -139,6 +183,166 @@ where
             ConditionalWriteOutcome::Conflict => Ok(DispatchOutcome::Existing),
         }
     }
+
+    /// Handle a follow-up topic command by resuming a pending SFN task token.
+    async fn handle_followup_command(
+        &self,
+        session: &domain::identity::TopicSessionId,
+        command: &str,
+        args: Option<&str>,
+        actor: ParticipantId,
+        update: &NormalizedUpdate,
+    ) -> Result<DispatchOutcome, DispatchError> {
+        let workflow = self
+            .repository
+            .load_by_topic(*session)
+            .await
+            .map_err(|_| DispatchError::Repository)?
+            .ok_or(DispatchError::InvalidUpdate)?;
+
+        let (Some(sfn_client), Some(dynamodb)) = (&self.sfn_client, &self.dynamodb) else {
+            // No SFN client configured — acknowledge without resuming.
+            return Ok(DispatchOutcome::Ignored);
+        };
+
+        let task_token = load_task_token(dynamodb, workflow.id()).await?;
+        let Some(token) = task_token else {
+            // No pending task token — the workflow may not be waiting.
+            return Ok(DispatchOutcome::Ignored);
+        };
+
+        let payload = serde_json::json!({
+            "command": command,
+            "args": args,
+            "actorId": actor.get(),
+            "workflowId": workflow.id().as_str(),
+            "updateId": update.update_id,
+            "sourceMessageId": update.source_message_id.get(),
+        });
+
+        let result = sfn_client
+            .send_task_success()
+            .task_token(&token)
+            .output(payload.to_string())
+            .send()
+            .await;
+
+        if result.is_err() {
+            return Err(DispatchError::Start);
+        }
+
+        // Delete the consumed task token.
+        let _ = delete_task_token(dynamodb, workflow.id()).await;
+
+        Ok(DispatchOutcome::Started)
+    }
+
+    /// Handle a callback query by resuming a pending SFN task token.
+    async fn handle_callback(
+        &self,
+        session: &domain::identity::TopicSessionId,
+        update: &NormalizedUpdate,
+    ) -> Result<DispatchOutcome, DispatchError> {
+        let workflow = self
+            .repository
+            .load_by_topic(*session)
+            .await
+            .map_err(|_| DispatchError::Repository)?
+            .ok_or(DispatchError::InvalidUpdate)?;
+
+        let (Some(sfn_client), Some(dynamodb)) = (&self.sfn_client, &self.dynamodb) else {
+            return Ok(DispatchOutcome::Ignored);
+        };
+
+        let task_token = load_task_token(dynamodb, workflow.id()).await?;
+        let Some(token) = task_token else {
+            return Ok(DispatchOutcome::Ignored);
+        };
+
+        let payload = serde_json::json!({
+            "callback": true,
+            "workflowId": workflow.id().as_str(),
+            "updateId": update.update_id,
+        });
+
+        let result = sfn_client
+            .send_task_success()
+            .task_token(&token)
+            .output(payload.to_string())
+            .send()
+            .await;
+
+        if result.is_err() {
+            return Err(DispatchError::Start);
+        }
+
+        let _ = delete_task_token(dynamodb, workflow.id()).await;
+        Ok(DispatchOutcome::Started)
+    }
+}
+
+/// Store a Step Functions task token in DynamoDB for a workflow.
+pub async fn store_task_token(
+    store: &DynamoDbStore,
+    workflow_id: &WorkflowId,
+    token: &str,
+) -> Result<(), DispatchError> {
+    let (pk, sk) =
+        storage::keys::task_token(workflow_id).map_err(|_| DispatchError::InvalidUpdate)?;
+    store
+        .client()
+        .put_item()
+        .table_name(store.table_name())
+        .item("pk", AttributeValue::S(pk))
+        .item("sk", AttributeValue::S(sk))
+        .item("entity", AttributeValue::S("task_token".to_owned()))
+        .item("token", AttributeValue::S(token.to_owned()))
+        .condition_expression("attribute_not_exists(pk)")
+        .send()
+        .await
+        .map_err(|_| DispatchError::Repository)?;
+    Ok(())
+}
+
+/// Load a pending Step Functions task token for a workflow.
+async fn load_task_token(
+    store: &DynamoDbStore,
+    workflow_id: &WorkflowId,
+) -> Result<Option<String>, DispatchError> {
+    let (pk, sk) =
+        storage::keys::task_token(workflow_id).map_err(|_| DispatchError::InvalidUpdate)?;
+    let output = store
+        .client()
+        .get_item()
+        .table_name(store.table_name())
+        .key("pk", AttributeValue::S(pk))
+        .key("sk", AttributeValue::S(sk))
+        .consistent_read(true)
+        .send()
+        .await
+        .map_err(|_| DispatchError::Repository)?;
+    Ok(output
+        .item
+        .and_then(|item| item.get("token").and_then(|v| v.as_s().ok()).cloned()))
+}
+
+/// Delete a consumed Step Functions task token.
+async fn delete_task_token(
+    store: &DynamoDbStore,
+    workflow_id: &WorkflowId,
+) -> Result<(), DispatchError> {
+    let (pk, sk) =
+        storage::keys::task_token(workflow_id).map_err(|_| DispatchError::InvalidUpdate)?;
+    store
+        .client()
+        .delete_item()
+        .table_name(store.table_name())
+        .key("pk", AttributeValue::S(pk))
+        .key("sk", AttributeValue::S(sk))
+        .send()
+        .await
+        .map_err(|_| DispatchError::Repository)?;
+    Ok(())
 }
 
 fn start_request(
