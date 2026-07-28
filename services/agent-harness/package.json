@@ -26,7 +26,7 @@
     "globals": "17.7.0",
     "typescript": "5.8.2",
     "typescript-compiler": "npm:typescript@7.0.2",
-    "typescript-eslint": "8.26.0",
+    "typescript-eslint": "8.65.0",
     "vitest": "3.0.8"
   }
 }
