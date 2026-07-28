@@ -44,7 +44,7 @@ aws-sdk-s3 = { version = "=1.138.1", features = ["behavior-version-latest"] }
 aws-sdk-sfn = { version = "=1.110.0", features = ["behavior-version-latest"] }
 aws-sdk-ssm = { version = "=1.116.0", features = ["behavior-version-latest"] }
 base64 = "0.22"
-getrandom = { version = "0.2", features = ["std"] }
+getrandom = { version = "0.4", features = ["std"] }
 hex = "0.4"
 hmac = "=0.13.0"
 jsonschema = "0.47"

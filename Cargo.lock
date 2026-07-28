@@ -2470,7 +2470,7 @@ dependencies = [
  "application",
  "base64",
  "domain",
- "getrandom 0.2.17",
+ "getrandom 0.4.3",
  "sha2 0.11.0",
  "thiserror",
  "tokio",
