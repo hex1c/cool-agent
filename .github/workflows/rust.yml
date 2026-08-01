@@ -51,14 +51,14 @@ jobs:
           # also disables rust-cache's automatic manifest/lockfile hash.
           add-rust-environment-hash-key: false
           key: ${{ hashFiles('**/Cargo.toml', '**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
-      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+      - uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
         with:
           tool: cargo-nextest@0.9.140
       - run: cargo fmt --all -- --check
       - name: Workspace dependency centralization
         run: python3 scripts/check-workspace-deps.py
       - name: Unused dependency audit (cargo-machete)
-        uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+        uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
         with:
           tool: cargo-machete@0.9.2
       - run: cargo machete --with-metadata --skip-target-dir .
@@ -98,7 +98,7 @@ jobs:
           workspaces: ". -> target/llvm-cov-target"
           shared-key: llvm-cov-${{ hashFiles('**/Cargo.toml', '**/Cargo.lock', 'rust-toolchain.toml', '.cargo/config.toml') }}
           add-rust-environment-hash-key: false
-      - uses: taiki-e/install-action@a6b2e2dcd845ddd7f509ce4f3ed3d922b80cc5d9 # v2
+      - uses: taiki-e/install-action@3d7d7cd5ac7f994c1892ae0c06165095b9139094 # v2
         with:
           tool: cargo-nextest@0.9.140,cargo-llvm-cov@0.8.7
       - name: Start credential-free local sandbox
