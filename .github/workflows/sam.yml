@@ -14,7 +14,7 @@ jobs:
     outputs:
       changed: ${{ steps.filter.outputs.sam }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
         id: filter
         with:
@@ -34,7 +34,7 @@ jobs:
     if: needs.detect.outputs.changed == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - uses: aws-actions/setup-sam@f84ec7d548307efafe33230528756de3c5841a17
         with:
           use-installer: true
